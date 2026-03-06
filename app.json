@@ -1,0 +1,21 @@
+{
+  "name": "my-mobile-app",
+  "displayName": "Plant Solutions",
+  "expo": {
+    "name": "Plant Solutions",
+    "slug": "plant-solutions",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tempapp"
+    },
+    "android": {
+      "package": "com.tempapp"
+    }
+  }
+}
