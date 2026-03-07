@@ -8,6 +8,7 @@ import {
   Alert,
 } from "react-native";
 import { AuthContext } from "../../context/AuthContext";
+import { sendOtp } from "../../services/authService";
 
 export default function LoginScreen({ navigation }) {
   const [phone, setPhone] = useState("");
@@ -22,14 +23,9 @@ export default function LoginScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // TODO: Replace with your API call
-      // const response = await API.post("/auth/send-otp", { phone });
-      
-      // For now, just navigate to OTP screen
-      setTimeout(() => {
-        navigation.navigate("OTP", { phone });
-        setLoading(false);
-      }, 1000);
+      await sendOtp(phone);
+      navigation.navigate("OTP", { phone });
+      setLoading(false);
     } catch (error) {
       Alert.alert("Error", "Failed to send OTP");
       setLoading(false);

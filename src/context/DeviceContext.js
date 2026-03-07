@@ -35,12 +35,8 @@ export function DeviceProvider({ children }) {
   const loadDevices = async () => {
     dispatch({ type: "LOAD_START" });
     try {
-      const resp = await deviceService.getDevices();
-      const mock = [
-      { id: 1, name: "Patio Sprinkler", isOn: true, moisture: 34, lastSeen: Date.now() },
-      { id: 2, name: "Roof Planter", isOn: false, moisture: 50, lastSeen: Date.now() },
-];
-      dispatch({ type: "LOAD_SUCCESS", payload: mock });
+      const devices = await deviceService.getDevices();
+      dispatch({ type: "LOAD_SUCCESS", payload: devices });
     } catch (err) {
       dispatch({ type: "LOAD_FAILURE", payload: err.message });
     }
@@ -57,8 +53,8 @@ export function DeviceProvider({ children }) {
 
   const updateDevice = async (id, data) => {
     try {
-      const resp = await deviceService.updateDevice(id, data);
-      dispatch({ type: "UPDATE_DEVICE", payload: resp.data });
+      const updated = await deviceService.updateDevice(id, data);
+      dispatch({ type: "UPDATE_DEVICE", payload: updated });
     } catch (err) {}
   };
 

@@ -8,6 +8,7 @@ import {
   Alert,
 } from "react-native";
 import { AuthContext } from "../../context/AuthContext";
+import { resendOtp, verifyOtp } from "../../services/authService";
 
 export default function OTPScreen({ route, navigation }) {
   const [otp, setOtp] = useState("");
@@ -29,36 +30,29 @@ export default function OTPScreen({ route, navigation }) {
       return;
     }
 
-    if (otp !== "1111") {
-      Alert.alert("Error", "Invalid OTP. Use 1111 for now.");
-      return;
-    }
-
     setLoading(true);
     try {
-      // TODO: Replace with your API call
-      // const response = await API.post("/auth/verify-otp", { phone, otp });
-      // const token = response.data.token;
-
-      // For now, just dispatch SIGN_IN
-      setTimeout(() => {
-        dispatch({
-          type: "SIGN_IN",
-          payload: "fake-jwt-token", // Replace with real token
-        });
-        setLoading(false);
-      }, 1000);
+      const response = await verifyOtp(phone, otp);
+      dispatch({
+        type: "SIGN_IN",
+        payload: response.token,
+      });
+      setLoading(false);
     } catch (error) {
-      Alert.alert("Error", "Invalid OTP");
+      Alert.alert("Error", "Invalid OTP. Use 1111 for now.");
       setLoading(false);
     }
   };
 
-  const handleResendOTP = () => {
+  const handleResendOTP = async () => {
     setTimer(60);
     setOtp("");
-    // TODO: Call API to resend OTP
-    Alert.alert("Success", "OTP sent to " + phone);
+    try {
+      await resendOtp(phone);
+      Alert.alert("Success", "OTP sent to " + phone);
+    } catch (error) {
+      Alert.alert("Error", "Failed to resend OTP");
+    }
   };
 
   return (

@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { getProducts } from "../../services/productService";
 
 export default function ShopScreen() {
   const navigation = useNavigation();
@@ -27,77 +28,32 @@ export default function ShopScreen() {
     { id: "tools", name: "Tools" },
   ];
 
-  // Mock data - replace with API call
-  const mockProducts = [
-    {
-      id: 1,
-      name: "Monstera Deliciosa",
-      category: "plants",
-      price: 599,
-      rating: 4.5,
-      image: "🌿",
-      description: "Beautiful indoor plant with large leaves",
-      inStock: true,
-    },
-    {
-      id: 2,
-      name: "Snake Plant",
-      category: "plants",
-      price: 399,
-      rating: 4.8,
-      image: "🌱",
-      description: "Low maintenance, air-purifying plant",
-      inStock: true,
-    },
-    {
-      id: 3,
-      name: "Ceramic Pot 6inch",
-      category: "pots",
-      price: 249,
-      rating: 4.2,
-      image: "🏺",
-      description: "Elegant ceramic pot with drainage",
-      inStock: true,
-    },
-    {
-      id: 4,
-      name: "Tomato Seeds",
-      category: "seeds",
-      price: 49,
-      rating: 4.6,
-      image: "🌱",
-      description: "Hybrid tomato seeds, high yield",
-      inStock: true,
-    },
-    {
-      id: 5,
-      name: "Garden Pruner",
-      category: "tools",
-      price: 299,
-      rating: 4.4,
-      image: "✂️",
-      description: "Professional stainless steel pruner",
-      inStock: true,
-    },
-    {
-      id: 6,
-      name: "Pothos Plant",
-      category: "plants",
-      price: 349,
-      rating: 4.7,
-      image: "🌿",
-      description: "Trailing plant, perfect for hanging",
-      inStock: false,
-    },
-  ];
+  const getProductEmoji = (item) => {
+    const imageMap = {
+      plant: "🌿",
+      pot: "🏺",
+      seed: "🌱",
+      tool: "✂️",
+    };
+
+    return imageMap[item.image] || "🌿";
+  };
 
   useEffect(() => {
-    // Simulate API call
-    setTimeout(() => {
-      setProducts(mockProducts);
-      setFilteredProducts(mockProducts);
-      setLoading(false);
-    }, 500);
+    const loadProducts = async () => {
+      try {
+        const response = await getProducts();
+        setProducts(response);
+        setFilteredProducts(response);
+      } catch (error) {
+        setProducts([]);
+        setFilteredProducts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProducts();
   }, []);
 
   useEffect(() => {
@@ -130,7 +86,7 @@ export default function ShopScreen() {
       }
     >
       <View style={styles.imageContainer}>
-        <Text style={styles.productImage}>{item.image}</Text>
+        <Text style={styles.productImage}>{getProductEmoji(item)}</Text>
         {!item.inStock && <View style={styles.outOfStockOverlay} />}
       </View>
       <View style={styles.productInfo}>

@@ -1,40 +1,33 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   FlatList,
+  ActivityIndicator,
 } from "react-native";
+import { getOrders } from "../../services/orderService";
 
 export default function OrdersScreen() {
-  const [orders] = useState([
-    {
-      id: "ORD001",
-      date: "March 5, 2026",
-      status: "Delivered",
-      items: 3,
-      total: 1299,
-      items_list: ["Monstera Deliciosa", "Ceramic Pot 6inch", "Snake Plant"],
-    },
-    {
-      id: "ORD002",
-      date: "February 28, 2026",
-      status: "Shipped",
-      items: 2,
-      total: 648,
-      items_list: ["Tomato Seeds", "Garden Pruner"],
-    },
-    {
-      id: "ORD003",
-      date: "February 20, 2026",
-      status: "Processing",
-      items: 1,
-      total: 599,
-      items_list: ["Pothos Plant"],
-    },
-  ]);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const loadOrders = async () => {
+      try {
+        const response = await getOrders();
+        setOrders(response);
+      } catch (err) {
+        setError("Failed to load orders");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadOrders();
+  }, []);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -111,6 +104,14 @@ export default function OrdersScreen() {
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -125,6 +126,11 @@ export default function OrdersScreen() {
         renderItem={({ item }) => <OrderCard order={item} />}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>{error || "No orders found"}</Text>
+          </View>
+        }
       />
     </View>
   );
@@ -134,6 +140,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#fff",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  emptyContainer: {
+    paddingVertical: 40,
+    alignItems: "center",
+  },
+  emptyText: {
+    color: "#999",
+    fontSize: 14,
   },
   header: {
     paddingHorizontal: 20,

@@ -9,6 +9,7 @@ import {
   Alert,
 } from "react-native";
 import { CartContext } from "../../context/CartContext";
+import { createOrder } from "../../services/orderService";
 
 export default function CartScreen({ navigation }) {
   const { state, dispatch } = useContext(CartContext);
@@ -23,20 +24,26 @@ export default function CartScreen({ navigation }) {
     ]);
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (state.items.length === 0) {
       Alert.alert("Empty Cart", "Please add items before checkout");
       return;
     }
-    Alert.alert("Order Placed", "Your order has been confirmed!", [
-      {
-        text: "OK",
-        onPress: () => {
-          dispatch({ type: "CLEAR_CART" });
-          navigation.navigate("Orders");
+
+    try {
+      await createOrder(state.items);
+      Alert.alert("Order Placed", "Your order has been confirmed!", [
+        {
+          text: "OK",
+          onPress: () => {
+            dispatch({ type: "CLEAR_CART" });
+            navigation.navigate("Orders");
+          },
         },
-      },
-    ]);
+      ]);
+    } catch (error) {
+      Alert.alert("Error", "Failed to place order. Please try again.");
+    }
   };
 
   const CartItem = ({ item }) => (
