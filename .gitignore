@@ -12,3 +12,6 @@ dist/
 android/.kotlin/
 *.apk
 *.aab
+
+# backend local environment
+backend/.env

@@ -1,9 +1,33 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
-const { products, devices, orders } = require("./data");
+const {
+  initDb,
+  listProducts,
+  getProductById,
+  listDevices,
+  updateDeviceState,
+  patchDevice,
+  listOrdersFromPrimary,
+  getOrderByIdFromPrimary,
+  getNextOrderNumber,
+  createOrderInPrimary,
+  withPrimaryTransaction,
+  checkPrimaryHealth,
+  checkSecondaryHealth,
+} = require("./db");
+const {
+  ensureIndex,
+  indexOrder,
+  getOrderById,
+  listOrders,
+  getOrderCount,
+  checkElasticHealth,
+} = require("./orderSearch");
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT || 4000);
 
 app.use(cors());
 app.use(express.json());
@@ -24,8 +48,45 @@ function getTodayLongDate() {
   });
 }
 
+async function backfillOrdersInSearchIfNeeded() {
+  const count = await getOrderCount();
+  if (count > 0) {
+    return;
+  }
+
+  const orders = await listOrdersFromPrimary();
+  for (const order of orders) {
+    await indexOrder(order);
+  }
+}
+
 app.get("/health", (_req, res) => {
-  return ok(res, { service: "plantu-backend", status: "up" });
+  return ok(res, {
+    service: "plantu-backend",
+    status: "up",
+    dbMode: "mysql-primary-write-secondary-read",
+    orderReadModel: "elasticsearch",
+  });
+});
+
+app.get("/health/dependencies", async (_req, res) => {
+  const [primary, secondary, elastic] = await Promise.all([
+    checkPrimaryHealth(),
+    checkSecondaryHealth(),
+    checkElasticHealth(),
+  ]);
+
+  const allHealthy = primary.ok && secondary.ok && elastic.ok;
+  const statusCode = allHealthy ? 200 : 503;
+
+  return res.status(statusCode).json({
+    success: allHealthy,
+    data: {
+      mysqlPrimary: primary,
+      mysqlSecondary: secondary,
+      elasticsearch: elastic,
+    },
+  });
 });
 
 app.post("/auth/send-otp", (req, res) => {
@@ -74,76 +135,94 @@ app.post("/auth/verify-otp", (req, res) => {
   });
 });
 
-app.get("/products", (req, res) => {
-  const { category, search } = req.query;
-
-  let result = [...products];
-  if (category && category !== "all") {
-    result = result.filter((p) => p.category === category);
+app.get("/products", async (req, res) => {
+  try {
+    const { category, search } = req.query;
+    const items = await listProducts({ category, search });
+    return ok(res, items);
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch products: ${error.message}`);
   }
+});
 
-  if (search) {
-    const query = String(search).toLowerCase();
-    result = result.filter((p) => p.name.toLowerCase().includes(query));
+app.get("/products/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const product = await getProductById(id);
+    if (!product) {
+      return fail(res, 404, "Product not found");
+    }
+
+    return ok(res, product);
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch product: ${error.message}`);
   }
-
-  return ok(res, result);
 });
 
-app.get("/products/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const product = products.find((p) => p.id === id);
-  if (!product) {
-    return fail(res, 404, "Product not found");
+app.get("/devices", async (_req, res) => {
+  try {
+    const items = await listDevices();
+    return ok(res, items);
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch devices: ${error.message}`);
   }
-
-  return ok(res, product);
 });
 
-app.get("/devices", (_req, res) => {
-  return ok(res, devices);
-});
+app.post("/devices/:id/state", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const updated = await updateDeviceState(id, Boolean(req.body?.on));
+    if (!updated) {
+      return fail(res, 404, "Device not found");
+    }
 
-app.post("/devices/:id/state", (req, res) => {
-  const id = Number(req.params.id);
-  const { on } = req.body || {};
-
-  const index = devices.findIndex((d) => d.id === id);
-  if (index < 0) {
-    return fail(res, 404, "Device not found");
+    return ok(res, updated);
+  } catch (error) {
+    return fail(res, 500, `Failed to update device state: ${error.message}`);
   }
-
-  devices[index] = {
-    ...devices[index],
-    isOn: Boolean(on),
-    lastSeen: Date.now(),
-  };
-
-  return ok(res, devices[index]);
 });
 
-app.patch("/devices/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const index = devices.findIndex((d) => d.id === id);
-  if (index < 0) {
-    return fail(res, 404, "Device not found");
+app.patch("/devices/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const updated = await patchDevice(id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "Device not found");
+    }
+
+    return ok(res, updated);
+  } catch (error) {
+    return fail(res, 500, `Failed to update device: ${error.message}`);
   }
-
-  devices[index] = {
-    ...devices[index],
-    ...req.body,
-    id,
-    lastSeen: Date.now(),
-  };
-
-  return ok(res, devices[index]);
 });
 
-app.get("/orders", (_req, res) => {
-  return ok(res, orders);
+app.get("/orders", async (_req, res) => {
+  try {
+    const items = await listOrders({ size: 200 });
+    return ok(res, items);
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch orders from Elasticsearch: ${error.message}`);
+  }
 });
 
-app.post("/orders", (req, res) => {
+app.get("/orders/:id", async (req, res) => {
+  try {
+    const item = await getOrderById(req.params.id);
+    if (!item) {
+      return fail(res, 404, "Order not found");
+    }
+
+    return ok(res, item);
+  } catch (error) {
+    if (error?.meta?.statusCode === 404) {
+      return fail(res, 404, "Order not found");
+    }
+
+    return fail(res, 500, `Failed to fetch order from Elasticsearch: ${error.message}`);
+  }
+});
+
+app.post("/orders", async (req, res) => {
   const { items } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) {
     return fail(res, 400, "Order requires at least one item");
@@ -155,24 +234,43 @@ app.post("/orders", (req, res) => {
     return sum + quantity * price;
   }, 0);
 
-  const nextNum = orders.length + 1;
-  const order = {
-    id: `ORD${String(nextNum).padStart(3, "0")}`,
-    date: getTodayLongDate(),
-    status: "Processing",
-    items: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
-    total,
-    items_list: items.map((item) => item.product?.name || "Item"),
-  };
+  try {
+    const nextNum = await getNextOrderNumber();
+    const order = {
+      id: `ORD${String(nextNum).padStart(3, "0")}`,
+      date: getTodayLongDate(),
+      status: "Processing",
+      items: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      total,
+      items_list: items.map((item) => item.product?.name || "Item"),
+    };
 
-  orders.unshift(order);
-  return ok(res, order);
+    await withPrimaryTransaction(async (connection) => {
+      await createOrderInPrimary(order, connection);
+      await indexOrder(order);
+    });
+
+    return ok(res, order);
+  } catch (error) {
+    return fail(res, 500, `Failed to create order in MySQL/Elasticsearch: ${error.message}`);
+  }
 });
 
 app.use((req, res) => {
   return fail(res, 404, `No route found for ${req.method} ${req.originalUrl}`);
 });
 
-app.listen(PORT, () => {
-  console.log(`Plantu backend running on http://localhost:${PORT}`);
+async function start() {
+  await initDb();
+  await ensureIndex();
+  await backfillOrdersInSearchIfNeeded();
+
+  app.listen(PORT, () => {
+    console.log(`Plantu backend running on http://localhost:${PORT}`);
+  });
+}
+
+start().catch((error) => {
+  console.error("Failed to start backend:", error.message);
+  process.exit(1);
 });
