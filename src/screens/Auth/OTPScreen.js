@@ -24,8 +24,13 @@ export default function OTPScreen({ route, navigation }) {
   }, [timer]);
 
   const handleVerifyOTP = async () => {
-    if (!otp || otp.length < 4) {
-      Alert.alert("Error", "Please enter a valid OTP");
+    if (!otp) {
+      Alert.alert("Error", "Please enter OTP");
+      return;
+    }
+
+    if (otp !== "1111") {
+      Alert.alert("Error", "Invalid OTP. Use 1111 for now.");
       return;
     }
 

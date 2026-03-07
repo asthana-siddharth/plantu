@@ -12,10 +12,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tempapp"
+      "bundleIdentifier": "com.plantsolutions.mobileapp"
     },
     "android": {
-      "package": "com.tempapp"
+      "package": "com.plantsolutions.mobileapp"
     }
   }
 }

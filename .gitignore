@@ -1,0 +1,14 @@
+node_modules
+
+# macOS
+.DS_Store
+
+# local release/signing secrets
+*.keystore
+*.jks
+
+# generated build outputs
+dist/
+android/.kotlin/
+*.apk
+*.aab

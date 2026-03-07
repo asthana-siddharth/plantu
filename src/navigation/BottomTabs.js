@@ -1,4 +1,5 @@
 import React, { useContext } from "react";
+import { Text } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
 import { CartContext } from "../context/CartContext";
@@ -6,7 +7,7 @@ import { CartContext } from "../context/CartContext";
 import HomeScreen from "../screens/Home/HomeScreen";
 import ShopScreen from "../screens/Shop/ShopScreen";
 import ProductDetailScreen from "../screens/Shop/ProductDetailScreen";
-import CartScreen from "../screens/Orders/CartScreen";
+import CartScreen from "../screens/Cart/CartScreen";
 import OrdersScreen from "../screens/Orders/OrdersScreen";
 import GardenerBookingScreen from "../screens/Services/GardenerBookingScreen";
 import IrrigationControlScreen from "../screens/SmartCare/IrrigationControlScreen";
