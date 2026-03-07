@@ -68,3 +68,54 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 
 ## License
 This project is licensed under the MIT License. See the LICENSE file for details.
+
+## Backend And Local Data Stack
+
+The backend is in `backend/` (Node + Express) and uses:
+
+- MySQL primary for writes (`localhost:3307`)
+- MySQL secondary for reads (`localhost:3308`)
+- Elasticsearch for order read APIs (`localhost:9200`)
+
+### Start local dependencies
+
+From project root:
+
+```bash
+docker compose up -d
+```
+
+### Configure backend env
+
+```bash
+cd backend
+cp .env.example .env
+```
+
+The defaults in `.env.example` already match the Docker port mappings above.
+
+### Start backend
+
+```bash
+cd backend
+npm install
+npm run start
+```
+
+Backend runs on `http://localhost:4000` by default.
+
+### Dependency health check
+
+```bash
+curl http://localhost:4000/health/dependencies
+```
+
+Expected: `success: true` once MySQL primary/secondary and Elasticsearch are reachable.
+
+### Stop local dependencies
+
+From project root:
+
+```bash
+docker compose down
+```
