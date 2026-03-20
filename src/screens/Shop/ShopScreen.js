@@ -14,6 +14,27 @@ import { useNavigation } from "@react-navigation/native";
 import { getProducts } from "../../services/productService";
 import { CartContext } from "../../context/CartContext";
 
+const CATEGORY_META = {
+  all: { name: "All", icon: "🧺" },
+  plants: { name: "Plants", icon: "🪴" },
+  pots: { name: "Pots", icon: "🏺" },
+  seeds: { name: "Seeds", icon: "🌱" },
+  tools: { name: "Tools", icon: "🛠️" },
+  planters: { name: "Planters", icon: "🧱" },
+  "soil-fertilizers": { name: "Soil & Fertilizers", icon: "🌾" },
+  irrigation: { name: "Irrigation", icon: "💧" },
+};
+
+function formatCategoryLabel(categoryId) {
+  const meta = CATEGORY_META[categoryId] || {};
+  const fallbackName = String(categoryId || "")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase()) || "Other";
+  const name = meta.name || fallbackName;
+  const icon = meta.icon || "📦";
+  return `${icon} ${name}`;
+}
+
 export default function ShopScreen() {
   const navigation = useNavigation();
   const { state, dispatch } = useContext(CartContext);
@@ -23,13 +44,28 @@ export default function ShopScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
 
-  const categories = [
-    { id: "all", name: "All" },
-    { id: "plants", name: "Plants" },
-    { id: "pots", name: "Pots" },
-    { id: "seeds", name: "Seeds" },
-    { id: "tools", name: "Tools" },
-  ];
+  const categories = React.useMemo(() => {
+    const discovered = Array.from(
+      new Set(
+        products
+          .map((item) => String(item.category || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+
+    const preferredOrder = ["plants", "pots", "seeds", "tools", "planters", "soil-fertilizers", "irrigation"];
+    const ordered = [
+      ...preferredOrder.filter((id) => discovered.includes(id)),
+      ...discovered.filter((id) => !preferredOrder.includes(id)),
+    ];
+
+    return [{ id: "all" }, ...ordered.map((id) => ({ id }))];
+  }, [products]);
+
+  const getStockQty = (product) => {
+    const parsed = Number(product?.stockQty ?? product?.stock_qty ?? 0);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  };
 
   const getProductEmoji = (item) => {
     const imageMap = {
@@ -39,7 +75,12 @@ export default function ShopScreen() {
       tool: "✂️",
     };
 
-    return imageMap[item.image] || "🌿";
+    if (imageMap[item.image]) {
+      return imageMap[item.image];
+    }
+
+    const category = String(item.category || "").trim().toLowerCase();
+    return (CATEGORY_META[category] && CATEGORY_META[category].icon) || "📦";
   };
 
   useEffect(() => {
@@ -112,7 +153,7 @@ export default function ShopScreen() {
           <View style={styles.quantityBox}>
             <TouchableOpacity
               style={styles.quantityAction}
-              disabled={!item.inStock || !cartQuantityMap[`product-${item.id}`]}
+              disabled={getStockQty(item) <= 0 || !cartQuantityMap[`product-${item.id}`]}
               onPress={(event) => {
                 event?.stopPropagation?.();
 
@@ -138,13 +179,14 @@ export default function ShopScreen() {
 
             <TouchableOpacity
               style={styles.quantityAction}
-              disabled={!item.inStock}
+              disabled={getStockQty(item) <= 0}
               onPress={(event) => {
                 event?.stopPropagation?.();
 
                 const currentQty = Number(cartQuantityMap[`product-${item.id}`] || 0);
-                if (currentQty >= Number(item.stockQty || 0)) {
-                  Alert.alert("Stock limit", `Only ${item.stockQty} units are available`);
+                const stockQty = getStockQty(item);
+                if (currentQty >= stockQty) {
+                  Alert.alert("Stock limit", `Only ${stockQty} units are available`);
                   return;
                 }
 
@@ -155,7 +197,7 @@ export default function ShopScreen() {
                     product: item,
                     quantity: 1,
                     productType: "product",
-                    maxQuantity: item.stockQty,
+                    maxQuantity: stockQty,
                   },
                 });
               }}
@@ -164,7 +206,7 @@ export default function ShopScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Text style={styles.stockText}>Available: {item.stockQty || 0}</Text>
+        <Text style={styles.stockText}>Available: {getStockQty(item)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -216,7 +258,7 @@ export default function ShopScreen() {
                 selectedCategory === cat.id && styles.categoryTextActive,
               ]}
             >
-              {cat.name}
+              {formatCategoryLabel(cat.id)}
             </Text>
           </TouchableOpacity>
         ))}

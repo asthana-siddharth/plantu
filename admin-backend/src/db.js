@@ -2,6 +2,11 @@ const mysql = require("mysql2/promise");
 
 let pool;
 
+const CATEGORY_HEADS = {
+  ITEM: "item",
+  SERVICE: "service",
+};
+
 const ORDER_FLOW = {
   Placed: ["Confirmed", "Cancelled"],
   Confirmed: ["Packed", "Cancelled"],
@@ -107,6 +112,36 @@ async function initSchema() {
   if (!(await columnExists("products", "vendor_id"))) {
     await query("ALTER TABLE products ADD COLUMN vendor_id INT NULL");
   }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS product_categories (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      slug VARCHAR(120) NOT NULL UNIQUE,
+      head ENUM('item', 'service') NOT NULL DEFAULT 'item',
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+function toSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function normalizeCategoryHead(head) {
+  const normalized = String(head || "").trim().toLowerCase();
+  if (normalized === CATEGORY_HEADS.ITEM || normalized === CATEGORY_HEADS.SERVICE) {
+    return normalized;
+  }
+  return "";
 }
 
 async function seedAdminData() {
@@ -146,6 +181,25 @@ async function seedAdminData() {
       ]
     );
   }
+
+  const categoryCount = await query("SELECT COUNT(1) AS count FROM product_categories");
+  if (Number(categoryCount[0].count) === 0) {
+    await query(
+      `INSERT INTO product_categories (name, slug, head, is_active)
+       VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)`,
+      [
+        "Plants", "plants", CATEGORY_HEADS.ITEM, 1,
+        "Pots", "pots", CATEGORY_HEADS.ITEM, 1,
+        "Seeds", "seeds", CATEGORY_HEADS.ITEM, 1,
+        "Tools", "tools", CATEGORY_HEADS.ITEM, 1,
+        "Planters", "planters", CATEGORY_HEADS.ITEM, 1,
+        "Soil & Fertilizers", "soil-fertilizers", CATEGORY_HEADS.ITEM, 1,
+        "Irrigation", "irrigation", CATEGORY_HEADS.ITEM, 1,
+        "Gardener Visit", "gardener-visit", CATEGORY_HEADS.SERVICE, 1,
+        "Plant Doctor", "plant-doctor", CATEGORY_HEADS.SERVICE, 1,
+      ]
+    );
+  }
 }
 
 async function initDb() {
@@ -169,7 +223,22 @@ async function listProducts() {
   return query("SELECT * FROM products ORDER BY id ASC");
 }
 
+async function getProductCategoryBySlug(slug) {
+  const rows = await query(
+    "SELECT * FROM product_categories WHERE slug = ? LIMIT 1",
+    [String(slug || "").trim().toLowerCase()]
+  );
+  return rows[0] || null;
+}
+
 async function createProduct(payload) {
+  const category = await getProductCategoryBySlug(payload.category);
+  if (!category || !category.is_active || category.head !== CATEGORY_HEADS.ITEM) {
+    const error = new Error("Invalid item category");
+    error.code = "INVALID_CATEGORY";
+    throw error;
+  }
+
   const result = await query(
     `INSERT INTO products (id, name, category, price, rating, image, description, in_stock, stock_qty, sku, vendor_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -191,6 +260,13 @@ async function createProduct(payload) {
 }
 
 async function updateProduct(id, patch) {
+  const category = await getProductCategoryBySlug(patch.category);
+  if (!category || !category.is_active || category.head !== CATEGORY_HEADS.ITEM) {
+    const error = new Error("Invalid item category");
+    error.code = "INVALID_CATEGORY";
+    throw error;
+  }
+
   await query(
     `UPDATE products
      SET name = ?, category = ?, price = ?, rating = ?, image = ?, description = ?,
@@ -215,11 +291,95 @@ async function updateProduct(id, patch) {
 
 async function listInventory() {
   return query(
-    `SELECT id, name, sku, stock_qty, in_stock,
+    `SELECT id, name, category, sku, stock_qty, in_stock,
             CASE WHEN stock_qty <= 5 THEN 'LOW' ELSE 'OK' END AS stock_status
      FROM products
      ORDER BY stock_qty ASC, id ASC`
   );
+}
+
+async function listProductCategories({ head } = {}) {
+  const normalizedHead = normalizeCategoryHead(head);
+  if (normalizedHead) {
+    return query(
+      "SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories WHERE head = ? ORDER BY name ASC",
+      [normalizedHead]
+    );
+  }
+
+  return query(
+    "SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories ORDER BY head ASC, name ASC"
+  );
+}
+
+async function createProductCategory(payload) {
+  const name = String(payload.name || "").trim();
+  const head = normalizeCategoryHead(payload.head);
+  const slug = toSlug(payload.slug || name);
+  const isActive = payload.isActive == null ? 1 : (payload.isActive ? 1 : 0);
+
+  if (!name || !head || !slug) {
+    const error = new Error("name and head are required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const exists = await query("SELECT id FROM product_categories WHERE slug = ? LIMIT 1", [slug]);
+  if (exists.length) {
+    const error = new Error("Category slug already exists");
+    error.code = "DUPLICATE_CATEGORY";
+    throw error;
+  }
+
+  const result = await query(
+    "INSERT INTO product_categories (name, slug, head, is_active) VALUES (?, ?, ?, ?)",
+    [name, slug, head, isActive]
+  );
+  const rows = await query(
+    "SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories WHERE id = ?",
+    [result.insertId]
+  );
+  return rows[0] || null;
+}
+
+async function updateProductCategory(id, payload) {
+  const existing = await query("SELECT * FROM product_categories WHERE id = ?", [id]);
+  if (!existing.length) {
+    return null;
+  }
+
+  const current = existing[0];
+  const name = String(payload.name ?? current.name).trim();
+  const nextHead = normalizeCategoryHead(payload.head ?? current.head);
+  const slug = toSlug(payload.slug || name || current.slug);
+  const isActive = payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0);
+
+  if (!name || !nextHead || !slug) {
+    const error = new Error("name and head are required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const duplicate = await query(
+    "SELECT id FROM product_categories WHERE slug = ? AND id <> ? LIMIT 1",
+    [slug, id]
+  );
+  if (duplicate.length) {
+    const error = new Error("Category slug already exists");
+    error.code = "DUPLICATE_CATEGORY";
+    throw error;
+  }
+
+  await query(
+    "UPDATE product_categories SET name = ?, slug = ?, head = ?, is_active = ? WHERE id = ?",
+    [name, slug, nextHead, isActive, id]
+  );
+
+  const rows = await query(
+    "SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories WHERE id = ?",
+    [id]
+  );
+  return rows[0] || null;
 }
 
 async function updateInventory(id, stockQty) {
@@ -357,4 +517,7 @@ module.exports = {
   listPromotions,
   createPromotion,
   updatePromotion,
+  listProductCategories,
+  createProductCategory,
+  updateProductCategory,
 };

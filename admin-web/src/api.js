@@ -26,3 +26,20 @@ export async function patchInventory(id, stockQty) {
   const response = await API.patch(`/admin/inventory/${id}`, { stockQty });
   return response?.data?.data;
 }
+
+export async function fetchProductCategories(head = "") {
+  const response = await API.get("/admin/product-categories", {
+    params: head ? { head } : {},
+  });
+  return response?.data?.data || [];
+}
+
+export async function createProductCategory(payload) {
+  const response = await API.post("/admin/product-categories", payload);
+  return response?.data?.data;
+}
+
+export async function createProduct(payload) {
+  const response = await API.post("/admin/products", payload);
+  return response?.data?.data;
+}

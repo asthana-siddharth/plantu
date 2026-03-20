@@ -73,7 +73,8 @@ body {
   flex-wrap: wrap;
 }
 
-.inlineForm input {
+.inlineForm input,
+.inlineForm select {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 8px;

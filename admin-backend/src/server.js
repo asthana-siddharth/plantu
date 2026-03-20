@@ -19,6 +19,9 @@ const {
   listPromotions,
   createPromotion,
   updatePromotion,
+  listProductCategories,
+  createProductCategory,
+  updateProductCategory,
 } = require("./db");
 
 const app = express();
@@ -62,6 +65,50 @@ app.get("/admin/products", async (_req, res) => {
   }
 });
 
+app.get("/admin/product-categories", async (req, res) => {
+  try {
+    const head = String(req.query?.head || "").trim();
+    return ok(res, await listProductCategories({ head }));
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch product categories: ${error.message}`);
+  }
+});
+
+app.post("/admin/product-categories", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.name || !payload.head) {
+      return fail(res, 400, "name and head are required");
+    }
+    return ok(res, await createProductCategory(payload));
+  } catch (error) {
+    if (error.code === "BAD_INPUT" || error.code === "DUPLICATE_CATEGORY") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to create product category: ${error.message}`);
+  }
+});
+
+app.put("/admin/product-categories/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid category id");
+    }
+
+    const updated = await updateProductCategory(id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "Product category not found");
+    }
+    return ok(res, updated);
+  } catch (error) {
+    if (error.code === "BAD_INPUT" || error.code === "DUPLICATE_CATEGORY") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to update product category: ${error.message}`);
+  }
+});
+
 app.post("/admin/products", async (req, res) => {
   try {
     const payload = req.body || {};
@@ -79,6 +126,9 @@ app.post("/admin/products", async (req, res) => {
     });
     return ok(res, { created: true, id: payload.id });
   } catch (error) {
+    if (error.code === "INVALID_CATEGORY") {
+      return fail(res, 400, error.message);
+    }
     return fail(res, 500, `Failed to create product: ${error.message}`);
   }
 });
@@ -94,6 +144,9 @@ app.put("/admin/products/:id", async (req, res) => {
     if (!rows.length) return fail(res, 404, "Product not found");
     return ok(res, rows[0]);
   } catch (error) {
+    if (error.code === "INVALID_CATEGORY") {
+      return fail(res, 400, error.message);
+    }
     return fail(res, 500, `Failed to update product: ${error.message}`);
   }
 });

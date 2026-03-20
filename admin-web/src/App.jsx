@@ -1,8 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { fetchModule, patchInventory, patchOrderStatus } from "./api";
+import {
+  createProduct,
+  createProductCategory,
+  fetchModule,
+  fetchProductCategories,
+  patchInventory,
+  patchOrderStatus,
+} from "./api";
 
 const modules = [
   { key: "products", label: "Products", path: "/admin/products" },
+  { key: "categoryMaster", label: "Product Category Master", path: "/admin/product-categories" },
   { key: "inventory", label: "Inventory", path: "/admin/inventory" },
   { key: "customers", label: "Customers", path: "/admin/customers" },
   { key: "orders", label: "Orders", path: "/admin/orders" },
@@ -64,8 +72,42 @@ export default function App() {
   const [orderStatus, setOrderStatus] = useState("Confirmed");
   const [inventoryId, setInventoryId] = useState("");
   const [inventoryQty, setInventoryQty] = useState("");
+  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("all");
+  const [categories, setCategories] = useState([]);
+  const [categoryName, setCategoryName] = useState("");
+  const [categoryHead, setCategoryHead] = useState("item");
+  const [productDraft, setProductDraft] = useState({
+    id: "",
+    name: "",
+    category: "",
+    price: "",
+    rating: "4.5",
+    image: "plant",
+    description: "",
+    stockQty: "10",
+    inStock: true,
+  });
 
   const activeLabel = useMemo(() => active.label, [active]);
+  const itemCategories = useMemo(
+    () => categories.filter((cat) => cat.head === "item" && Number(cat.is_active) === 1),
+    [categories]
+  );
+  const inventoryFilteredRows = useMemo(() => {
+    if (active.key !== "inventory") return rows;
+    if (inventoryCategoryFilter === "all") return rows;
+    return rows.filter((row) => String(row.category || "") === inventoryCategoryFilter);
+  }, [rows, inventoryCategoryFilter, active.key]);
+
+  async function loadCategories() {
+    try {
+      const data = await fetchProductCategories();
+      setCategories(data);
+    } catch (_err) {
+      // Keep admin page functional even if category fetch fails once.
+      setCategories([]);
+    }
+  }
 
   async function loadModule(moduleObj) {
     setLoading(true);
@@ -84,6 +126,10 @@ export default function App() {
   useEffect(() => {
     loadModule(active);
   }, [active]);
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
 
   async function handleOrderPatch(event) {
     event.preventDefault();
@@ -110,6 +156,57 @@ export default function App() {
       setInventoryQty("");
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Update failed");
+    }
+  }
+
+  async function handleCreateCategory(event) {
+    event.preventDefault();
+    if (!categoryName.trim() || !categoryHead.trim()) return;
+
+    try {
+      await createProductCategory({ name: categoryName.trim(), head: categoryHead.trim() });
+      setCategoryName("");
+      setCategoryHead("item");
+      await Promise.all([loadCategories(), loadModule(active)]);
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Create category failed");
+    }
+  }
+
+  async function handleCreateProduct(event) {
+    event.preventDefault();
+
+    const parsedId = Number(productDraft.id);
+    const parsedPrice = Number(productDraft.price);
+    const parsedRating = Number(productDraft.rating);
+    const parsedStockQty = Number(productDraft.stockQty);
+
+    if (!parsedId || !productDraft.name.trim() || !productDraft.category.trim()) return;
+    if (Number.isNaN(parsedPrice) || Number.isNaN(parsedRating) || Number.isNaN(parsedStockQty)) return;
+
+    try {
+      await createProduct({
+        id: parsedId,
+        name: productDraft.name.trim(),
+        category: productDraft.category.trim(),
+        price: parsedPrice,
+        rating: parsedRating,
+        image: productDraft.image.trim() || "plant",
+        description: productDraft.description.trim() || "",
+        stockQty: parsedStockQty,
+        inStock: productDraft.inStock,
+      });
+      setProductDraft((prev) => ({
+        ...prev,
+        id: "",
+        name: "",
+        price: "",
+        description: "",
+        stockQty: "10",
+      }));
+      await loadModule(active);
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Create product failed");
     }
   }
 
@@ -159,11 +256,32 @@ export default function App() {
 
         {active.key === "inventory" && (
           <form className="inlineForm" onSubmit={handleInventoryPatch}>
-            <input
-              placeholder="Product ID"
+            <select
+              value={inventoryCategoryFilter}
+              onChange={(e) => {
+                const next = e.target.value;
+                setInventoryCategoryFilter(next);
+                setInventoryId("");
+              }}
+            >
+              <option value="all">All Item Categories</option>
+              {itemCategories.map((cat) => (
+                <option key={cat.id} value={cat.slug}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+            <select
               value={inventoryId}
               onChange={(e) => setInventoryId(e.target.value)}
-            />
+            >
+              <option value="">Select Product</option>
+              {inventoryFilteredRows.map((row) => (
+                <option key={row.id} value={row.id}>
+                  #{row.id} {row.name}
+                </option>
+              ))}
+            </select>
             <input
               placeholder="Stock Qty"
               value={inventoryQty}
@@ -173,9 +291,81 @@ export default function App() {
           </form>
         )}
 
+        {active.key === "products" && (
+          <form className="inlineForm" onSubmit={handleCreateProduct}>
+            <input
+              placeholder="ID"
+              value={productDraft.id}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, id: e.target.value }))}
+            />
+            <input
+              placeholder="Product Name"
+              value={productDraft.name}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, name: e.target.value }))}
+            />
+            <select
+              value={productDraft.category}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, category: e.target.value }))}
+            >
+              <option value="">Select Category</option>
+              {itemCategories.map((cat) => (
+                <option key={cat.id} value={cat.slug}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Price"
+              value={productDraft.price}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, price: e.target.value }))}
+            />
+            <input
+              placeholder="Rating"
+              value={productDraft.rating}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, rating: e.target.value }))}
+            />
+            <input
+              placeholder="Image Key (plant/pot/seed/tool)"
+              value={productDraft.image}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, image: e.target.value }))}
+            />
+            <input
+              placeholder="Stock Qty"
+              value={productDraft.stockQty}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, stockQty: e.target.value }))}
+            />
+            <input
+              placeholder="Description"
+              value={productDraft.description}
+              onChange={(e) => setProductDraft((prev) => ({ ...prev, description: e.target.value }))}
+            />
+            <button type="submit">Add Product</button>
+          </form>
+        )}
+
+        {active.key === "categoryMaster" && (
+          <form className="inlineForm" onSubmit={handleCreateCategory}>
+            <input
+              placeholder="Category Name"
+              value={categoryName}
+              onChange={(e) => setCategoryName(e.target.value)}
+            />
+            <select
+              value={categoryHead}
+              onChange={(e) => setCategoryHead(e.target.value)}
+            >
+              <option value="item">Items</option>
+              <option value="service">Services</option>
+            </select>
+            <button type="submit">Add Category</button>
+          </form>
+        )}
+
         {loading && <p className="muted">Loading...</p>}
         {error && <p className="error">{error}</p>}
-        {!loading && !error && <DataTable rows={rows} />}
+        {!loading && !error && (
+          <DataTable rows={active.key === "inventory" ? inventoryFilteredRows : rows} />
+        )}
       </main>
     </div>
   );
