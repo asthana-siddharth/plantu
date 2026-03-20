@@ -57,6 +57,7 @@ export default function ShopScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const isSingleColumn = filteredProducts.length <= 1;
 
   const categories = React.useMemo(() => {
     const discovered = Array.from(
@@ -251,52 +252,58 @@ export default function ShopScreen() {
       </View>
 
       {/* Categories */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.categoriesContainer}
-      >
-        {categories.map((cat) => (
-          <TouchableOpacity
-            key={cat.id}
-            style={[
-              styles.categoryButton,
-              selectedCategory === cat.id && styles.categoryButtonActive,
-            ]}
-            onPress={() => setSelectedCategory(cat.id)}
-          >
-            <View style={styles.categoryChipInner}>
-              <Text
-                allowFontScaling={false}
-                style={[
-                  styles.categoryIcon,
-                  selectedCategory === cat.id && styles.categoryIconActive,
-                ]}
-              >
-                {getCategoryIcon(cat.id)}
-              </Text>
-              <Text
-                allowFontScaling={false}
-                numberOfLines={1}
-                style={[
-                  styles.categoryText,
-                  selectedCategory === cat.id && styles.categoryTextActive,
-                ]}
-              >
-                {getCategoryName(cat.id)}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={styles.categoryStrip}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesContainer}
+        >
+          {categories.map((cat) => (
+            <TouchableOpacity
+              key={cat.id}
+              style={[
+                styles.categoryButton,
+                selectedCategory === cat.id && styles.categoryButtonActive,
+              ]}
+              onPress={() => setSelectedCategory(cat.id)}
+            >
+              <View style={styles.categoryChipInner}>
+                <View style={styles.categoryIconWrap}>
+                  <Text
+                    allowFontScaling={false}
+                    style={[
+                      styles.categoryIcon,
+                      selectedCategory === cat.id && styles.categoryIconActive,
+                    ]}
+                  >
+                    {getCategoryIcon(cat.id)}
+                  </Text>
+                </View>
+                <Text
+                  allowFontScaling={false}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  style={[
+                    styles.categoryText,
+                    selectedCategory === cat.id && styles.categoryTextActive,
+                  ]}
+                >
+                  {getCategoryName(cat.id)}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {/* Products Grid */}
       <FlatList
+        key={isSingleColumn ? "single-col" : "two-col"}
         data={filteredProducts}
         renderItem={({ item }) => <ProductCard item={item} />}
         keyExtractor={(item) => item.id.toString()}
-        numColumns={2}
-        columnWrapperStyle={styles.row}
+        numColumns={isSingleColumn ? 1 : 2}
+        columnWrapperStyle={isSingleColumn ? undefined : styles.row}
         contentContainerStyle={styles.productsList}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -347,14 +354,19 @@ const styles = StyleSheet.create({
   },
   categoriesContainer: {
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  categoryStrip: {
+    minHeight: 72,
+    zIndex: 2,
   },
   categoryButton: {
     borderWidth: 1,
     borderColor: "#ddd",
     borderRadius: 14,
     paddingHorizontal: 12,
-    minWidth: 110,
+    width: 128,
     height: 52,
     justifyContent: "center",
     marginRight: 10,
@@ -362,11 +374,17 @@ const styles = StyleSheet.create({
   categoryChipInner: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  categoryIconWrap: {
+    width: 20,
+    alignItems: "center",
     justifyContent: "center",
+    marginRight: 6,
   },
   categoryIcon: {
-    fontSize: 17,
-    marginRight: 6,
+    fontSize: 16,
+    lineHeight: 18,
   },
   categoryIconActive: {
     opacity: 1,
@@ -376,7 +394,8 @@ const styles = StyleSheet.create({
     borderColor: "#4CAF50",
   },
   categoryText: {
-    fontSize: 14,
+    flex: 1,
+    fontSize: 13,
     fontWeight: "600",
     color: "#666",
   },
@@ -386,7 +405,9 @@ const styles = StyleSheet.create({
   },
   productsList: {
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingTop: 8,
+    paddingBottom: 10,
+    minHeight: 260,
   },
   row: {
     justifyContent: "space-between",
