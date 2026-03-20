@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0.39
+    container_name: plantu-poc-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: plantu_db
+    ports:
+      - "3307:3306"
+    volumes:
+      - plantu_poc_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: plantu-poc-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      DB_PRIMARY_HOST: mysql
+      DB_PRIMARY_PORT: 3306
+      DB_PRIMARY_USER: root
+      DB_PRIMARY_PASSWORD: root
+      DB_PRIMARY_NAME: plantu_db
+      DB_PRIMARY_POOL_SIZE: 10
+    ports:
+      - "4000:4000"
+
+volumes:
+  plantu_poc_mysql_data:
