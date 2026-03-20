@@ -148,6 +148,7 @@ export default function OrderDetailsScreen({ route, navigation }) {
         <Text style={styles.meta}>Date: {order.date}</Text>
         <Text style={styles.meta}>Status: {order.status}</Text>
         <Text style={styles.meta}>Payment: {order.payment_status || "paid"}</Text>
+        <Text style={styles.meta}>Delivery Mode: {String(order.deliveryMode || "pickup")}</Text>
       </View>
 
       <View style={styles.card}>
@@ -193,6 +194,14 @@ export default function OrderDetailsScreen({ route, navigation }) {
         <Text style={styles.totalMeta}>₹{Math.round(Number(order.subtotal ?? order.total ?? 0))}</Text>
         <Text style={styles.totalLabel}>Tax</Text>
         <Text style={styles.totalMeta}>₹{Math.round(Number(order.taxTotal || 0))}</Text>
+        {Array.isArray(order.chargeBreakdown) && order.chargeBreakdown.length > 0 ? (
+          order.chargeBreakdown.map((charge) => (
+            <View key={String(charge.key || charge.label)} style={styles.chargeRow}>
+              <Text style={styles.chargeLabel}>{charge.label}</Text>
+              <Text style={styles.chargeValue}>₹{Math.round(Number(charge.amount || 0))}</Text>
+            </View>
+          ))
+        ) : null}
         <Text style={styles.totalLabel}>Grand Total</Text>
         <Text style={styles.totalValue}>₹{Math.round(Number(order.total || 0))}</Text>
       </View>
@@ -237,6 +246,9 @@ const styles = StyleSheet.create({
   emptyHint: { fontSize: 13, color: "#758", paddingVertical: 4 },
   totalLabel: { fontSize: 14, color: "#556" },
   totalMeta: { fontSize: 16, fontWeight: "700", color: "#2f5f4a", marginBottom: 6 },
+  chargeRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
+  chargeLabel: { fontSize: 13, color: "#5d6d5f" },
+  chargeValue: { fontSize: 13, color: "#2b4b35", fontWeight: "600" },
   totalValue: { fontSize: 26, fontWeight: "800", color: "#1f6f45", marginTop: 3 },
   primaryButton: {
     backgroundColor: "#4CAF50",

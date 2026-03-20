@@ -10,10 +10,138 @@ import {
 } from "react-native";
 import { CartContext } from "../../context/CartContext";
 import { AuthContext } from "../../context/AuthContext";
+import { getTaxConfig } from "../../services/taxService";
+
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function isServiceItem(item) {
+  if (String(item?.productType || "").toLowerCase() === "service") {
+    return true;
+  }
+  return String(item?.id || "").toLowerCase().startsWith("service-");
+}
+
+function getDisplayImage(product = {}, isService = false) {
+  if (isService) {
+    return product.image || "🧑‍🌾";
+  }
+
+  const imageMap = {
+    plant: "🌿",
+    pot: "🏺",
+    seed: "🌱",
+    tool: "✂️",
+  };
+
+  const normalized = String(product.image || "").trim().toLowerCase();
+  return imageMap[normalized] || product.image || "📦";
+}
 
 export default function CartScreen({ navigation }) {
   const { state, dispatch } = useContext(CartContext);
   const { state: authState } = useContext(AuthContext);
+  const [deliveryMode, setDeliveryMode] = React.useState("pickup");
+  const [taxConfig, setTaxConfig] = React.useState({
+    itemSgstPercent: 0,
+    itemCgstPercent: 0,
+    serviceSgstPercent: 0,
+    serviceCgstPercent: 0,
+    itemTaxPercent: 0,
+    serviceTaxPercent: 0,
+    platformFee: 0,
+    transportationFee: 100,
+  });
+
+  React.useEffect(() => {
+    let isMounted = true;
+    async function loadTaxConfig() {
+      try {
+        const config = await getTaxConfig();
+        if (isMounted) {
+          setTaxConfig({
+            itemSgstPercent: Number(config.itemSgstPercent || 0),
+            itemCgstPercent: Number(config.itemCgstPercent || 0),
+            serviceSgstPercent: Number(config.serviceSgstPercent || 0),
+            serviceCgstPercent: Number(config.serviceCgstPercent || 0),
+            itemTaxPercent: Number(config.itemTaxPercent || 0),
+            serviceTaxPercent: Number(config.serviceTaxPercent || 0),
+            platformFee: Number(config.platformFee || 0),
+            transportationFee: Number(config.transportationFee || 100),
+          });
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setTaxConfig({
+            itemSgstPercent: 0,
+            itemCgstPercent: 0,
+            serviceSgstPercent: 0,
+            serviceCgstPercent: 0,
+            itemTaxPercent: 0,
+            serviceTaxPercent: 0,
+            platformFee: 0,
+            transportationFee: 100,
+          });
+        }
+      }
+    }
+
+    loadTaxConfig();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const summary = React.useMemo(() => {
+    const itemSubtotal = state.items
+      .filter((item) => !isServiceItem(item))
+      .reduce((sum, item) => sum + Number(item.price || 0), 0);
+
+    const serviceSubtotal = state.items
+      .filter((item) => isServiceItem(item))
+      .reduce((sum, item) => sum + Number(item.price || 0), 0);
+
+    const itemSgst = roundMoney((itemSubtotal * Number(taxConfig.itemSgstPercent || 0)) / 100);
+    const itemCgst = roundMoney((itemSubtotal * Number(taxConfig.itemCgstPercent || 0)) / 100);
+    const serviceSgst = roundMoney((serviceSubtotal * Number(taxConfig.serviceSgstPercent || 0)) / 100);
+    const serviceCgst = roundMoney((serviceSubtotal * Number(taxConfig.serviceCgstPercent || 0)) / 100);
+    const itemTax = roundMoney(itemSgst + itemCgst);
+    const serviceTax = roundMoney(serviceSgst + serviceCgst);
+    const subtotal = roundMoney(itemSubtotal + serviceSubtotal);
+    const taxTotal = roundMoney(itemTax + serviceTax);
+    const platformFee = roundMoney(Number(taxConfig.platformFee || 0));
+    const transportationFee = deliveryMode === "delivery"
+      ? roundMoney(Number(taxConfig.transportationFee || 0))
+      : 0;
+    const total = roundMoney(subtotal + taxTotal + platformFee + transportationFee);
+
+    return {
+      subtotal,
+      itemSubtotal,
+      serviceSubtotal,
+      itemSgst,
+      itemCgst,
+      serviceSgst,
+      serviceCgst,
+      itemTax,
+      serviceTax,
+      platformFee,
+      transportationFee,
+      taxTotal,
+      total,
+      itemSgstPercent: Number(taxConfig.itemSgstPercent || 0),
+      itemCgstPercent: Number(taxConfig.itemCgstPercent || 0),
+      serviceSgstPercent: Number(taxConfig.serviceSgstPercent || 0),
+      serviceCgstPercent: Number(taxConfig.serviceCgstPercent || 0),
+    };
+  }, [state.items, taxConfig, deliveryMode]);
+
+  const orderedItems = React.useMemo(() => {
+    const products = state.items.filter((item) => !isServiceItem(item));
+    const services = state.items.filter((item) => isServiceItem(item));
+    return [...products, ...services];
+  }, [state.items]);
 
   const handleRemoveItem = (itemId) => {
     Alert.alert("Remove Item", "Are you sure?", [
@@ -43,19 +171,24 @@ export default function CartScreen({ navigation }) {
 
     navigation.navigate("DummyPayment", {
       cartItems: state.items,
-      payable: Math.round(state.totalPrice * 1.18),
+      payable: summary.total,
+      summary,
+      deliveryMode,
     });
   };
 
   const CartItem = ({ item }) => (
+    (() => {
+      const serviceItem = isServiceItem(item);
+      return (
     <View style={styles.cartItem}>
       <View style={styles.itemImage}>
-        <Text style={styles.image}>{item.product.image}</Text>
+        <Text style={styles.image}>{getDisplayImage(item.product, serviceItem)}</Text>
       </View>
       <View style={styles.itemDetails}>
         <Text style={styles.itemName}>{item.product.name}</Text>
         <Text style={styles.itemPrice}>₹{item.product.price}</Text>
-        {item.productType === "service" && <Text style={styles.serviceTag}>Service</Text>}
+        {serviceItem && <Text style={styles.serviceTag}>Service</Text>}
         <View style={styles.quantityControls}>
           <TouchableOpacity
             onPress={() =>
@@ -88,6 +221,8 @@ export default function CartScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </View>
+      );
+    })()
   );
 
   if (state.items.length === 0) {
@@ -118,50 +253,79 @@ export default function CartScreen({ navigation }) {
       </View>
 
       <FlatList
-        data={state.items}
+        data={orderedItems}
         renderItem={({ item }) => <CartItem item={item} />}
         keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.listContainer}
+        ListFooterComponent={
+          <View style={styles.summary}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Subtotal</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.subtotal)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>SGST on Item ({summary.itemSgstPercent}%)</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.itemSgst)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>CGST on Item ({summary.itemCgstPercent}%)</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.itemCgst)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>SGST on Service ({summary.serviceSgstPercent}%)</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.serviceSgst)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>CGST on Service ({summary.serviceCgstPercent}%)</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.serviceCgst)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Platform Fee</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.platformFee)}</Text>
+            </View>
+            <View style={styles.deliveryToggleRow}>
+              <Text style={styles.summaryLabel}>Order Fulfilment</Text>
+              <View style={styles.deliveryToggleGroup}>
+                <TouchableOpacity
+                  style={[styles.modeChip, deliveryMode === "pickup" && styles.modeChipActive]}
+                  onPress={() => setDeliveryMode("pickup")}
+                >
+                  <Text style={[styles.modeChipText, deliveryMode === "pickup" && styles.modeChipTextActive]}>Pickup</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeChip, deliveryMode === "delivery" && styles.modeChipActive]}
+                  onPress={() => setDeliveryMode("delivery")}
+                >
+                  <Text style={[styles.modeChipText, deliveryMode === "delivery" && styles.modeChipTextActive]}>Delivery</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Transportation Fee</Text>
+              <Text style={styles.summaryValue}>₹{Math.round(summary.transportationFee)}</Text>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.summaryRow}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalValue}>₹{Math.round(summary.total)}</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.checkoutButton}
+              onPress={handleCheckout}
+            >
+              <Text style={styles.checkoutButtonText}>Proceed to Checkout</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.continueShopping}
+              onPress={() => navigation.navigate("Shop")}
+            >
+              <Text style={styles.continueShoppingText}>Continue Shopping</Text>
+            </TouchableOpacity>
+          </View>
+        }
       />
-
-      {/* Order Summary */}
-      <View style={styles.summary}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Subtotal</Text>
-          <Text style={styles.summaryValue}>₹{state.totalPrice}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Shipping</Text>
-          <Text style={styles.summaryValue}>FREE</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Tax (18%)</Text>
-          <Text style={styles.summaryValue}>
-            ₹{Math.round(state.totalPrice * 0.18)}
-          </Text>
-        </View>
-        <View style={styles.divider} />
-        <View style={styles.summaryRow}>
-          <Text style={styles.totalLabel}>Total</Text>
-          <Text style={styles.totalValue}>
-            ₹{Math.round(state.totalPrice * 1.18)}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.checkoutButton}
-          onPress={handleCheckout}
-        >
-          <Text style={styles.checkoutButtonText}>Proceed to Checkout</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.continueShopping}
-          onPress={() => navigation.navigate("Shop")}
-        >
-          <Text style={styles.continueShoppingText}>Continue Shopping</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -240,7 +404,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   image: {
-    fontSize: 40,
+    fontSize: 34,
   },
   itemDetails: {
     flex: 1,
@@ -309,6 +473,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 12,
+  },
+  deliveryToggleRow: {
+    marginBottom: 12,
+  },
+  deliveryToggleGroup: {
+    flexDirection: "row",
+    marginTop: 8,
+  },
+  modeChip: {
+    borderWidth: 1,
+    borderColor: "#cfd8cf",
+    borderRadius: 18,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    marginRight: 8,
+  },
+  modeChipActive: {
+    backgroundColor: "#4CAF50",
+    borderColor: "#4CAF50",
+  },
+  modeChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#355a35",
+  },
+  modeChipTextActive: {
+    color: "#fff",
   },
   summaryLabel: {
     fontSize: 14,

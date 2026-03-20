@@ -6,11 +6,13 @@ import { CartProvider } from "./context/CartContext";
 import { DeviceProvider } from "./context/DeviceContext";
 import RootNavigator from "./navigation/RootNavigator";
 import { setAuthToken } from "./services/api";
+import AppSplashScreen from "./components/AppSplashScreen";
 
 const AUTH_STORAGE_KEY = "plantu.auth.token";
 const AUTH_USER_STORAGE_KEY = "plantu.auth.user";
 
 export default function App() {
+  const [showSplash, setShowSplash] = React.useState(true);
   const [state, dispatch] = React.useReducer(
     (prevState, action) => {
       switch (action.type) {
@@ -51,6 +53,11 @@ export default function App() {
       user: null,
     }
   );
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 1700);
+    return () => clearTimeout(timer);
+  }, []);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -106,14 +113,18 @@ export default function App() {
   }, [state.userToken, state.user]);
 
   return (
-    <AuthContext.Provider value={{ state, dispatch }}>
-      <CartProvider>
-        <DeviceProvider>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
-        </DeviceProvider>
-      </CartProvider>
-    </AuthContext.Provider>
+    showSplash ? (
+      <AppSplashScreen />
+    ) : (
+      <AuthContext.Provider value={{ state, dispatch }}>
+        <CartProvider>
+          <DeviceProvider>
+            <NavigationContainer>
+              <RootNavigator />
+            </NavigationContainer>
+          </DeviceProvider>
+        </CartProvider>
+      </AuthContext.Provider>
+    )
   );
 }

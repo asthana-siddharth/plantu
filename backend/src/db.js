@@ -4,6 +4,15 @@ const { products, devices, orders } = require("./data");
 let primaryPool;
 const TEMP_INVENTORY_BASELINE = 10;
 
+const TAX_SCOPES = {
+  ITEM_SGST: "item_sgst",
+  ITEM_CGST: "item_cgst",
+  SERVICE_SGST: "service_sgst",
+  SERVICE_CGST: "service_cgst",
+  PLATFORM_FEE: "platform_fee",
+  TRANSPORTATION_FEE: "transportation_fee",
+};
+
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
@@ -65,6 +74,12 @@ function mapOrder(row) {
     items: row.items,
     subtotal: Number(row.subtotal_amount ?? row.total ?? 0),
     taxTotal: Number(row.tax_total ?? 0),
+    itemTaxTotal: Number(row.item_tax_total ?? 0),
+    serviceTaxTotal: Number(row.service_tax_total ?? 0),
+    platformFee: Number(row.platform_fee ?? 0),
+    transportationFee: Number(row.transportation_fee ?? 0),
+    deliveryMode: row.delivery_mode || "pickup",
+    chargeBreakdown: parseList(row.charge_breakdown),
     total: Number(row.total),
     items_list: parseList(row.items_list),
     order_items: parseList(row.order_items),
@@ -208,6 +223,30 @@ async function initializeSchema() {
     await queryPrimary("ALTER TABLE orders ADD COLUMN tax_total DECIMAL(12, 2) NOT NULL DEFAULT 0");
   }
 
+  if (!(await columnExists("orders", "item_tax_total"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN item_tax_total DECIMAL(12, 2) NOT NULL DEFAULT 0");
+  }
+
+  if (!(await columnExists("orders", "service_tax_total"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN service_tax_total DECIMAL(12, 2) NOT NULL DEFAULT 0");
+  }
+
+  if (!(await columnExists("orders", "platform_fee"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN platform_fee DECIMAL(12, 2) NOT NULL DEFAULT 0");
+  }
+
+  if (!(await columnExists("orders", "transportation_fee"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN transportation_fee DECIMAL(12, 2) NOT NULL DEFAULT 0");
+  }
+
+  if (!(await columnExists("orders", "delivery_mode"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN delivery_mode VARCHAR(16) NOT NULL DEFAULT 'pickup'");
+  }
+
+  if (!(await columnExists("orders", "charge_breakdown"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN charge_breakdown JSON NULL");
+  }
+
   await queryPrimary(`
     CREATE TABLE IF NOT EXISTS users (
       id VARCHAR(64) PRIMARY KEY,
@@ -259,16 +298,30 @@ async function initializeSchema() {
   await queryPrimary(`
     CREATE TABLE IF NOT EXISTS tax_rules (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      scope ENUM('item', 'service') NOT NULL UNIQUE,
+      scope VARCHAR(64) NOT NULL UNIQUE,
       tax_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+      charge_type ENUM('percent', 'flat') NOT NULL DEFAULT 'percent',
+      applies_on ENUM('always', 'delivery_only') NOT NULL DEFAULT 'always',
       is_active TINYINT(1) NOT NULL DEFAULT 1,
       description VARCHAR(255) NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+
+  await queryPrimary("ALTER TABLE tax_rules MODIFY COLUMN scope VARCHAR(64) NOT NULL");
+
+  if (!(await columnExists("tax_rules", "charge_type"))) {
+    await queryPrimary("ALTER TABLE tax_rules ADD COLUMN charge_type ENUM('percent', 'flat') NOT NULL DEFAULT 'percent'");
+  }
+
+  if (!(await columnExists("tax_rules", "applies_on"))) {
+    await queryPrimary("ALTER TABLE tax_rules ADD COLUMN applies_on ENUM('always', 'delivery_only') NOT NULL DEFAULT 'always'");
+  }
 }
 
 async function seedIfEmpty() {
+  await queryPrimary("DELETE FROM tax_rules WHERE scope IN ('item', 'service')");
+
   const productCountRows = await queryPrimary("SELECT COUNT(1) AS count FROM products");
   if (productCountRows[0].count === 0) {
     for (const item of products) {
@@ -339,14 +392,34 @@ async function seedIfEmpty() {
   const taxRuleCountRows = await queryPrimary("SELECT COUNT(1) AS count FROM tax_rules");
   if (taxRuleCountRows[0].count === 0) {
     await queryPrimary(
-      `INSERT INTO tax_rules (scope, tax_percent, is_active, description)
-       VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+      `INSERT INTO tax_rules (scope, tax_percent, charge_type, applies_on, is_active, description)
+       VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
       [
-        "item", 18, 1, "Default GST for physical items",
-        "service", 18, 1, "Default GST for services",
+        TAX_SCOPES.ITEM_SGST, 9, "percent", "always", 1, "SGST on items",
+        TAX_SCOPES.ITEM_CGST, 9, "percent", "always", 1, "CGST on items",
+        TAX_SCOPES.SERVICE_SGST, 9, "percent", "always", 1, "SGST on services",
+        TAX_SCOPES.SERVICE_CGST, 9, "percent", "always", 1, "CGST on services",
+        TAX_SCOPES.PLATFORM_FEE, 20, "flat", "always", 1, "Mandatory platform fee",
+        TAX_SCOPES.TRANSPORTATION_FEE, 100, "flat", "delivery_only", 1, "Delivery fee (default)",
       ]
     );
   }
+
+  // Ensure all required rules exist even on older DBs with only item/service entries.
+  await queryPrimary(
+    `INSERT INTO tax_rules (scope, tax_percent, charge_type, applies_on, is_active, description)
+     VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       tax_percent = tax_percent`,
+    [
+      TAX_SCOPES.ITEM_SGST, 9, "percent", "always", 1, "SGST on items",
+      TAX_SCOPES.ITEM_CGST, 9, "percent", "always", 1, "CGST on items",
+      TAX_SCOPES.SERVICE_SGST, 9, "percent", "always", 1, "SGST on services",
+      TAX_SCOPES.SERVICE_CGST, 9, "percent", "always", 1, "CGST on services",
+      TAX_SCOPES.PLATFORM_FEE, 20, "flat", "always", 1, "Mandatory platform fee",
+      TAX_SCOPES.TRANSPORTATION_FEE, 100, "flat", "delivery_only", 1, "Delivery fee (default)",
+    ]
+  );
 }
 
 async function initDb() {
@@ -494,8 +567,8 @@ async function decrementProductStock(id, quantity, connection) {
 async function createOrderInPrimary(order, connection) {
   const db = connection || primaryPool;
   await db.query(
-    `INSERT INTO orders (id, date, status, items, subtotal_amount, tax_total, total, items_list, order_items, user_id, payment_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders (id, date, status, items, subtotal_amount, tax_total, item_tax_total, service_tax_total, platform_fee, transportation_fee, delivery_mode, charge_breakdown, total, items_list, order_items, user_id, payment_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id,
       order.date,
@@ -503,6 +576,12 @@ async function createOrderInPrimary(order, connection) {
       order.items,
       roundMoney(order.subtotal || 0),
       roundMoney(order.taxTotal || 0),
+      roundMoney(order.itemTaxTotal || 0),
+      roundMoney(order.serviceTaxTotal || 0),
+      roundMoney(order.platformFee || 0),
+      roundMoney(order.transportationFee || 0),
+      order.deliveryMode || "pickup",
+      toDbList(order.chargeBreakdown || []),
       order.total,
       toDbList(order.items_list),
       toDbList(order.order_items || []),
@@ -614,7 +693,7 @@ async function getServiceById(id) {
 
 async function listTaxRules() {
   return querySecondary(
-    "SELECT id, scope, tax_percent, is_active, description, updated_at FROM tax_rules ORDER BY scope ASC"
+    "SELECT id, scope, tax_percent, charge_type, applies_on, is_active, description, updated_at FROM tax_rules ORDER BY scope ASC"
   );
 }
 
@@ -622,16 +701,34 @@ async function getTaxConfigMap() {
   const rows = await listTaxRules();
   const activeRows = rows.filter((row) => Number(row.is_active) === 1);
 
-  const itemRow = activeRows.find((row) => row.scope === "item");
-  const serviceRow = activeRows.find((row) => row.scope === "service");
+  function readValue(scope, fallback = 0, includeInactive = false) {
+    const sourceRows = includeInactive ? rows : activeRows;
+    const row = sourceRows.find((entry) => entry.scope === scope);
+    return Number(row?.tax_percent || fallback);
+  }
+
+  const itemSgstPercent = readValue(TAX_SCOPES.ITEM_SGST);
+  const itemCgstPercent = readValue(TAX_SCOPES.ITEM_CGST);
+  const serviceSgstPercent = readValue(TAX_SCOPES.SERVICE_SGST);
+  const serviceCgstPercent = readValue(TAX_SCOPES.SERVICE_CGST);
+  const platformFee = readValue(TAX_SCOPES.PLATFORM_FEE, 0, true);
+  const transportationFee = readValue(TAX_SCOPES.TRANSPORTATION_FEE, 100, true);
 
   return {
-    itemTaxPercent: Number(itemRow?.tax_percent || 0),
-    serviceTaxPercent: Number(serviceRow?.tax_percent || 0),
+    itemSgstPercent,
+    itemCgstPercent,
+    serviceSgstPercent,
+    serviceCgstPercent,
+    itemTaxPercent: roundMoney(itemSgstPercent + itemCgstPercent),
+    serviceTaxPercent: roundMoney(serviceSgstPercent + serviceCgstPercent),
+    platformFee,
+    transportationFee,
     rules: rows.map((row) => ({
       id: row.id,
       scope: row.scope,
       taxPercent: Number(row.tax_percent || 0),
+      chargeType: row.charge_type || "percent",
+      appliesOn: row.applies_on || "always",
       isActive: Boolean(row.is_active),
       description: row.description || "",
       updatedAt: row.updated_at,

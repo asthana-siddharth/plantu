@@ -6,7 +6,7 @@ import { CartContext } from "../../context/CartContext";
 export default function DummyPaymentScreen({ route, navigation }) {
   const { dispatch } = React.useContext(CartContext);
   const [processing, setProcessing] = useState(false);
-  const { cartItems = [], payable = 0 } = route.params || {};
+  const { cartItems = [], payable = 0, summary, deliveryMode = "pickup" } = route.params || {};
 
   const handleConfirmPayment = async () => {
     if (!cartItems.length) {
@@ -16,7 +16,7 @@ export default function DummyPaymentScreen({ route, navigation }) {
 
     setProcessing(true);
     try {
-      const order = await createOrder(cartItems);
+      const order = await createOrder(cartItems, { deliveryMode });
       dispatch({ type: "CLEAR_CART" });
 
       navigation.replace("OrderDetails", { orderId: order.id, order });
@@ -34,6 +34,29 @@ export default function DummyPaymentScreen({ route, navigation }) {
       <View style={styles.card}>
         <Text style={styles.cardLabel}>Amount Payable</Text>
         <Text style={styles.amount}>₹{Math.round(Number(payable || 0))}</Text>
+        {summary ? (
+          <View style={styles.summaryBlock}>
+            <Text style={styles.summaryLine}>Subtotal: ₹{Math.round(Number(summary.subtotal || 0))}</Text>
+            <Text style={styles.summaryLine}>
+              SGST on Item ({Number(summary.itemSgstPercent || 0)}%): ₹{Math.round(Number(summary.itemSgst || 0))}
+            </Text>
+            <Text style={styles.summaryLine}>
+              CGST on Item ({Number(summary.itemCgstPercent || 0)}%): ₹{Math.round(Number(summary.itemCgst || 0))}
+            </Text>
+            <Text style={styles.summaryLine}>
+              SGST on Service ({Number(summary.serviceSgstPercent || 0)}%): ₹{Math.round(Number(summary.serviceSgst || 0))}
+            </Text>
+            <Text style={styles.summaryLine}>
+              CGST on Service ({Number(summary.serviceCgstPercent || 0)}%): ₹{Math.round(Number(summary.serviceCgst || 0))}
+            </Text>
+            <Text style={styles.summaryLine}>
+              Platform Fee: ₹{Math.round(Number(summary.platformFee || 0))}
+            </Text>
+            <Text style={styles.summaryLine}>
+              Transportation Fee ({deliveryMode}): ₹{Math.round(Number(summary.transportationFee || 0))}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <TouchableOpacity
@@ -87,6 +110,14 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: "800",
     color: "#1f6f45",
+  },
+  summaryBlock: {
+    marginTop: 8,
+  },
+  summaryLine: {
+    color: "#5f6f6f",
+    fontSize: 13,
+    marginTop: 2,
   },
   primaryButton: {
     backgroundColor: "#4CAF50",

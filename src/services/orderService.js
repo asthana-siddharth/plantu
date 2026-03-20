@@ -5,8 +5,11 @@ export async function getOrders() {
 	return extractData(response) || [];
 }
 
-export async function createOrder(items) {
-	const response = await API.post("/orders", { items });
+export async function createOrder(items, checkout = {}) {
+	const response = await API.post("/orders", {
+		items,
+		deliveryMode: checkout.deliveryMode || "pickup",
+	});
 	return extractData(response);
 }
 

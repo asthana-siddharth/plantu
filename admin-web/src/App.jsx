@@ -185,8 +185,10 @@ export default function App() {
     isActive: true,
   });
   const [taxDraft, setTaxDraft] = useState({
-    scope: "item",
-    taxPercent: "18",
+    scope: "item_sgst",
+    taxPercent: "9",
+    chargeType: "percent",
+    appliesOn: "always",
     isActive: true,
     description: "",
   });
@@ -246,8 +248,12 @@ export default function App() {
       case "taxControl":
         return [
           { value: "all", label: "All Scopes" },
-          { value: "item", label: "Items" },
-          { value: "service", label: "Services" },
+          { value: "item_sgst", label: "SGST on Item" },
+          { value: "item_cgst", label: "CGST on Item" },
+          { value: "service_sgst", label: "SGST on Service" },
+          { value: "service_cgst", label: "CGST on Service" },
+          { value: "platform_fee", label: "Platform Fee" },
+          { value: "transportation_fee", label: "Transportation Fee" },
         ];
       default:
         return [{ value: "all", label: "All" }];
@@ -485,6 +491,8 @@ export default function App() {
       await upsertTaxRule({
         scope: taxDraft.scope,
         taxPercent,
+        chargeType: taxDraft.chargeType,
+        appliesOn: taxDraft.appliesOn,
         isActive: taxDraft.isActive,
         description: taxDraft.description.trim(),
       });
@@ -777,21 +785,52 @@ export default function App() {
           <form className="inlineForm" onSubmit={handleUpsertTaxRule}>
             <select
               value={taxDraft.scope}
-              onChange={(e) => setTaxDraft((prev) => ({ ...prev, scope: e.target.value }))}
+              onChange={(e) => {
+                const nextScope = e.target.value;
+                const isFee = nextScope === "platform_fee" || nextScope === "transportation_fee";
+                setTaxDraft((prev) => ({
+                  ...prev,
+                  scope: nextScope,
+                  chargeType: isFee ? "flat" : "percent",
+                  appliesOn: nextScope === "transportation_fee" ? "delivery_only" : "always",
+                  isActive: nextScope === "platform_fee" ? true : prev.isActive,
+                }));
+              }}
             >
-              <option value="item">Items</option>
-              <option value="service">Services</option>
+              <option value="item_sgst">SGST on Item</option>
+              <option value="item_cgst">CGST on Item</option>
+              <option value="service_sgst">SGST on Service</option>
+              <option value="service_cgst">CGST on Service</option>
+              <option value="platform_fee">Platform Fee</option>
+              <option value="transportation_fee">Transportation Fee</option>
             </select>
             <input
-              placeholder="Tax Percent"
+              placeholder={taxDraft.chargeType === "flat" ? "Amount (INR)" : "Tax Percent"}
               value={taxDraft.taxPercent}
               onChange={(e) => setTaxDraft((prev) => ({ ...prev, taxPercent: e.target.value }))}
             />
+            <select
+              value={taxDraft.chargeType}
+              onChange={(e) => setTaxDraft((prev) => ({ ...prev, chargeType: e.target.value }))}
+              disabled={taxDraft.scope === "platform_fee" || taxDraft.scope === "transportation_fee"}
+            >
+              <option value="percent">Percent</option>
+              <option value="flat">Flat Amount</option>
+            </select>
+            <select
+              value={taxDraft.appliesOn}
+              onChange={(e) => setTaxDraft((prev) => ({ ...prev, appliesOn: e.target.value }))}
+              disabled={taxDraft.scope === "platform_fee" || taxDraft.scope === "transportation_fee"}
+            >
+              <option value="always">Always</option>
+              <option value="delivery_only">Delivery Only</option>
+            </select>
             <select
               value={taxDraft.isActive ? "active" : "inactive"}
               onChange={(e) =>
                 setTaxDraft((prev) => ({ ...prev, isActive: e.target.value === "active" }))
               }
+              disabled={taxDraft.scope === "platform_fee"}
             >
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>

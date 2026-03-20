@@ -331,6 +331,9 @@ app.post("/orders/:id/cancel", requireAuth, async (req, res) => {
 
 app.post("/orders", requireAuth, async (req, res) => {
   const { items } = req.body || {};
+  const deliveryMode = String(req.body?.deliveryMode || "pickup").trim().toLowerCase() === "delivery"
+    ? "delivery"
+    : "pickup";
   if (!Array.isArray(items) || items.length === 0) {
     return fail(res, 400, "Order requires at least one item");
   }
@@ -346,7 +349,8 @@ app.post("/orders", requireAuth, async (req, res) => {
 
     const taxConfig = await getTaxConfigMap();
     let subtotal = 0;
-    let taxTotal = 0;
+    let itemTaxTotal = 0;
+    let serviceTaxTotal = 0;
     let totalUnits = 0;
 
     for (const item of items) {
@@ -356,7 +360,9 @@ app.post("/orders", requireAuth, async (req, res) => {
       if (type === "service") {
         const linePrice = Number(item.product?.price || item.price || 0);
         const lineSubtotal = roundMoney(linePrice * quantity);
-        const taxPercent = Number(taxConfig.serviceTaxPercent || 0);
+        const sgstPercent = Number(taxConfig.serviceSgstPercent || 0);
+        const cgstPercent = Number(taxConfig.serviceCgstPercent || 0);
+        const taxPercent = roundMoney(sgstPercent + cgstPercent);
         const lineTax = roundMoney((lineSubtotal * taxPercent) / 100);
         const lineTotal = roundMoney(lineSubtotal + lineTax);
         const title = item.product?.name || item.product?.title || "Service";
@@ -366,13 +372,15 @@ app.post("/orders", requireAuth, async (req, res) => {
           name: title,
           unitPrice: linePrice,
           taxPercent,
+          sgstPercent,
+          cgstPercent,
           quantity,
           lineSubtotal,
           lineTax,
           lineTotal,
         });
         subtotal += lineSubtotal;
-        taxTotal += lineTax;
+        serviceTaxTotal += lineTax;
         totalUnits += quantity;
         continue;
       }
@@ -389,7 +397,9 @@ app.post("/orders", requireAuth, async (req, res) => {
 
       const linePrice = Number(item.product?.price || stockRow.price || 0);
       const lineSubtotal = roundMoney(linePrice * quantity);
-      const taxPercent = Number(taxConfig.itemTaxPercent || 0);
+      const sgstPercent = Number(taxConfig.itemSgstPercent || 0);
+      const cgstPercent = Number(taxConfig.itemCgstPercent || 0);
+      const taxPercent = roundMoney(sgstPercent + cgstPercent);
       const lineTax = roundMoney((lineSubtotal * taxPercent) / 100);
       const lineTotal = roundMoney(lineSubtotal + lineTax);
       normalizedItems.push({
@@ -398,17 +408,68 @@ app.post("/orders", requireAuth, async (req, res) => {
         name: item.product?.name || stockRow.name,
         unitPrice: linePrice,
         taxPercent,
+        sgstPercent,
+        cgstPercent,
         quantity,
         lineSubtotal,
         lineTax,
         lineTotal,
       });
       subtotal += lineSubtotal;
-      taxTotal += lineTax;
+      itemTaxTotal += lineTax;
       totalUnits += quantity;
     }
 
-    const total = roundMoney(subtotal + taxTotal);
+    const taxTotal = roundMoney(itemTaxTotal + serviceTaxTotal);
+    const platformFee = roundMoney(Number(taxConfig.platformFee || 0));
+    const transportationFee = deliveryMode === "delivery"
+      ? roundMoney(Number(taxConfig.transportationFee || 0))
+      : 0;
+    const total = roundMoney(subtotal + taxTotal + platformFee + transportationFee);
+    const chargeBreakdown = [
+      {
+        key: "item_sgst",
+        label: "SGST on Item",
+        type: "percent",
+        value: Number(taxConfig.itemSgstPercent || 0),
+        amount: roundMoney((normalizedItems.filter((entry) => entry.type === "product").reduce((sum, entry) => sum + entry.lineSubtotal, 0) * Number(taxConfig.itemSgstPercent || 0)) / 100),
+      },
+      {
+        key: "item_cgst",
+        label: "CGST on Item",
+        type: "percent",
+        value: Number(taxConfig.itemCgstPercent || 0),
+        amount: roundMoney((normalizedItems.filter((entry) => entry.type === "product").reduce((sum, entry) => sum + entry.lineSubtotal, 0) * Number(taxConfig.itemCgstPercent || 0)) / 100),
+      },
+      {
+        key: "service_sgst",
+        label: "SGST on Service",
+        type: "percent",
+        value: Number(taxConfig.serviceSgstPercent || 0),
+        amount: roundMoney((normalizedItems.filter((entry) => entry.type === "service").reduce((sum, entry) => sum + entry.lineSubtotal, 0) * Number(taxConfig.serviceSgstPercent || 0)) / 100),
+      },
+      {
+        key: "service_cgst",
+        label: "CGST on Service",
+        type: "percent",
+        value: Number(taxConfig.serviceCgstPercent || 0),
+        amount: roundMoney((normalizedItems.filter((entry) => entry.type === "service").reduce((sum, entry) => sum + entry.lineSubtotal, 0) * Number(taxConfig.serviceCgstPercent || 0)) / 100),
+      },
+      {
+        key: "platform_fee",
+        label: "Platform Fee",
+        type: "flat",
+        value: platformFee,
+        amount: platformFee,
+      },
+      {
+        key: "transportation_fee",
+        label: "Transportation Fee",
+        type: "flat",
+        value: Number(taxConfig.transportationFee || 0),
+        amount: transportationFee,
+      },
+    ];
 
     const order = {
       id: orderId,
@@ -417,6 +478,12 @@ app.post("/orders", requireAuth, async (req, res) => {
       items: totalUnits,
       subtotal: roundMoney(subtotal),
       taxTotal: roundMoney(taxTotal),
+      itemTaxTotal: roundMoney(itemTaxTotal),
+      serviceTaxTotal: roundMoney(serviceTaxTotal),
+      platformFee,
+      transportationFee,
+      deliveryMode,
+      chargeBreakdown,
       total,
       items_list: normalizedItems.map((item) => item.name),
       order_items: normalizedItems,

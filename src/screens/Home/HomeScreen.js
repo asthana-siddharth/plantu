@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal,
+  Image,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../../context/AuthContext";
@@ -68,7 +69,10 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <View>
-            <Text style={styles.greeting}>Welcome to Plantu 🌿</Text>
+            <View style={styles.greetingRow}>
+              <Text style={styles.greeting}>Welcome to Plantu</Text>
+              <Image source={require("../../assets/images/plantu-logo.png")} style={styles.greetingLogo} />
+            </View>
             <Text style={styles.subtitle}>Grow smarter, not harder</Text>
           </View>
           <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
@@ -207,6 +211,16 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#333",
     marginBottom: 5,
+  },
+  greetingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  greetingLogo: {
+    width: 28,
+    height: 28,
+    marginLeft: 8,
+    marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,

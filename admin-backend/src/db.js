@@ -8,8 +8,22 @@ const CATEGORY_HEADS = {
 };
 
 const TAX_SCOPES = {
-  ITEM: "item",
-  SERVICE: "service",
+  ITEM_SGST: "item_sgst",
+  ITEM_CGST: "item_cgst",
+  SERVICE_SGST: "service_sgst",
+  SERVICE_CGST: "service_cgst",
+  PLATFORM_FEE: "platform_fee",
+  TRANSPORTATION_FEE: "transportation_fee",
+};
+
+const CHARGE_TYPES = {
+  PERCENT: "percent",
+  FLAT: "flat",
+};
+
+const APPLIES_ON = {
+  ALWAYS: "always",
+  DELIVERY_ONLY: "delivery_only",
 };
 
 const ORDER_FLOW = {
@@ -160,13 +174,26 @@ async function initSchema() {
   await query(`
     CREATE TABLE IF NOT EXISTS tax_rules (
       id INT AUTO_INCREMENT PRIMARY KEY,
-      scope ENUM('item', 'service') NOT NULL UNIQUE,
+      scope VARCHAR(64) NOT NULL UNIQUE,
       tax_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+      charge_type ENUM('percent', 'flat') NOT NULL DEFAULT 'percent',
+      applies_on ENUM('always', 'delivery_only') NOT NULL DEFAULT 'always',
       is_active TINYINT(1) NOT NULL DEFAULT 1,
       description VARCHAR(255) NULL,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+
+  // Existing deployments may still have ENUM('item','service'); widen for new scopes.
+  await query("ALTER TABLE tax_rules MODIFY COLUMN scope VARCHAR(64) NOT NULL");
+
+  if (!(await columnExists("tax_rules", "charge_type"))) {
+    await query("ALTER TABLE tax_rules ADD COLUMN charge_type ENUM('percent', 'flat') NOT NULL DEFAULT 'percent'");
+  }
+
+  if (!(await columnExists("tax_rules", "applies_on"))) {
+    await query("ALTER TABLE tax_rules ADD COLUMN applies_on ENUM('always', 'delivery_only') NOT NULL DEFAULT 'always'");
+  }
 }
 
 function toSlug(value) {
@@ -210,13 +237,31 @@ function normalizeBoolFilter(value) {
 
 function normalizeTaxScope(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === TAX_SCOPES.ITEM || normalized === TAX_SCOPES.SERVICE) {
+  if (Object.values(TAX_SCOPES).includes(normalized)) {
+    return normalized;
+  }
+  return "";
+}
+
+function normalizeChargeType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === CHARGE_TYPES.PERCENT || normalized === CHARGE_TYPES.FLAT) {
+    return normalized;
+  }
+  return "";
+}
+
+function normalizeAppliesOn(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === APPLIES_ON.ALWAYS || normalized === APPLIES_ON.DELIVERY_ONLY) {
     return normalized;
   }
   return "";
 }
 
 async function seedAdminData() {
+  await query("DELETE FROM tax_rules WHERE scope IN ('item', 'service')");
+
   const customersCount = await query("SELECT COUNT(1) AS count FROM customers");
   if (Number(customersCount[0].count) === 0) {
     await query(
@@ -289,14 +334,33 @@ async function seedAdminData() {
   const taxRuleCount = await query("SELECT COUNT(1) AS count FROM tax_rules");
   if (Number(taxRuleCount[0].count) === 0) {
     await query(
-      `INSERT INTO tax_rules (scope, tax_percent, is_active, description)
-       VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+      `INSERT INTO tax_rules (scope, tax_percent, charge_type, applies_on, is_active, description)
+       VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
       [
-        TAX_SCOPES.ITEM, 18, 1, "Default GST for physical items",
-        TAX_SCOPES.SERVICE, 18, 1, "Default GST for services",
+        TAX_SCOPES.ITEM_SGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "SGST on items",
+        TAX_SCOPES.ITEM_CGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "CGST on items",
+        TAX_SCOPES.SERVICE_SGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "SGST on services",
+        TAX_SCOPES.SERVICE_CGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "CGST on services",
+        TAX_SCOPES.PLATFORM_FEE, 20, CHARGE_TYPES.FLAT, APPLIES_ON.ALWAYS, 1, "Mandatory platform fee",
+        TAX_SCOPES.TRANSPORTATION_FEE, 100, CHARGE_TYPES.FLAT, APPLIES_ON.DELIVERY_ONLY, 1, "Delivery fee (default)",
       ]
     );
   }
+
+  await query(
+    `INSERT INTO tax_rules (scope, tax_percent, charge_type, applies_on, is_active, description)
+     VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       tax_percent = tax_percent`,
+    [
+      TAX_SCOPES.ITEM_SGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "SGST on items",
+      TAX_SCOPES.ITEM_CGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "CGST on items",
+      TAX_SCOPES.SERVICE_SGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "SGST on services",
+      TAX_SCOPES.SERVICE_CGST, 9, CHARGE_TYPES.PERCENT, APPLIES_ON.ALWAYS, 1, "CGST on services",
+      TAX_SCOPES.PLATFORM_FEE, 20, CHARGE_TYPES.FLAT, APPLIES_ON.ALWAYS, 1, "Mandatory platform fee",
+      TAX_SCOPES.TRANSPORTATION_FEE, 100, CHARGE_TYPES.FLAT, APPLIES_ON.DELIVERY_ONLY, 1, "Delivery fee (default)",
+    ]
+  );
 }
 
 async function initDb() {
@@ -924,7 +988,7 @@ async function listTaxRules({ search, scope, isActive } = {}) {
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return query(
-    `SELECT id, scope, tax_percent, is_active, description, updated_at
+    `SELECT id, scope, tax_percent, charge_type, applies_on, is_active, description, updated_at
      FROM tax_rules
      ${where}
      ORDER BY scope ASC`,
@@ -935,27 +999,34 @@ async function listTaxRules({ search, scope, isActive } = {}) {
 async function upsertTaxRule(payload) {
   const scope = normalizeTaxScope(payload.scope);
   const taxPercent = Number(payload.taxPercent ?? payload.tax_percent);
-  const isActive = payload.isActive == null ? 1 : (payload.isActive ? 1 : 0);
+  const requestedChargeType = normalizeChargeType(payload.chargeType || payload.charge_type);
+  const requestedAppliesOn = normalizeAppliesOn(payload.appliesOn || payload.applies_on);
+  const isMandatoryScope = scope === TAX_SCOPES.PLATFORM_FEE;
+  const chargeType = requestedChargeType || (scope === TAX_SCOPES.PLATFORM_FEE || scope === TAX_SCOPES.TRANSPORTATION_FEE ? CHARGE_TYPES.FLAT : CHARGE_TYPES.PERCENT);
+  const appliesOn = requestedAppliesOn || (scope === TAX_SCOPES.TRANSPORTATION_FEE ? APPLIES_ON.DELIVERY_ONLY : APPLIES_ON.ALWAYS);
+  const isActive = isMandatoryScope ? 1 : (payload.isActive == null ? 1 : (payload.isActive ? 1 : 0));
   const description = payload.description == null ? null : String(payload.description || "").trim();
 
   if (!scope || Number.isNaN(taxPercent) || taxPercent < 0) {
-    const error = new Error("scope and valid taxPercent are required");
+    const error = new Error("scope and valid non-negative value are required");
     error.code = "BAD_INPUT";
     throw error;
   }
 
   await query(
-    `INSERT INTO tax_rules (scope, tax_percent, is_active, description)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO tax_rules (scope, tax_percent, charge_type, applies_on, is_active, description)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        tax_percent = VALUES(tax_percent),
+       charge_type = VALUES(charge_type),
+       applies_on = VALUES(applies_on),
        is_active = VALUES(is_active),
        description = VALUES(description)`,
-    [scope, taxPercent, isActive, description]
+    [scope, taxPercent, chargeType, appliesOn, isActive, description]
   );
 
   const rows = await query(
-    "SELECT id, scope, tax_percent, is_active, description, updated_at FROM tax_rules WHERE scope = ?",
+    "SELECT id, scope, tax_percent, charge_type, applies_on, is_active, description, updated_at FROM tax_rules WHERE scope = ?",
     [scope]
   );
   return rows[0] || null;
@@ -970,22 +1041,27 @@ async function updateTaxRule(id, payload) {
   const current = existing[0];
   const scope = normalizeTaxScope(payload.scope || current.scope);
   const taxPercent = Number(payload.taxPercent ?? payload.tax_percent ?? current.tax_percent);
-  const isActive = payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0);
+  const requestedChargeType = normalizeChargeType(payload.chargeType || payload.charge_type || current.charge_type);
+  const requestedAppliesOn = normalizeAppliesOn(payload.appliesOn || payload.applies_on || current.applies_on);
+  const isMandatoryScope = scope === TAX_SCOPES.PLATFORM_FEE;
+  const chargeType = requestedChargeType || (scope === TAX_SCOPES.PLATFORM_FEE || scope === TAX_SCOPES.TRANSPORTATION_FEE ? CHARGE_TYPES.FLAT : CHARGE_TYPES.PERCENT);
+  const appliesOn = requestedAppliesOn || (scope === TAX_SCOPES.TRANSPORTATION_FEE ? APPLIES_ON.DELIVERY_ONLY : APPLIES_ON.ALWAYS);
+  const isActive = isMandatoryScope ? 1 : (payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0));
   const description = payload.description == null ? current.description : String(payload.description || "").trim();
 
   if (!scope || Number.isNaN(taxPercent) || taxPercent < 0) {
-    const error = new Error("scope and valid taxPercent are required");
+    const error = new Error("scope and valid non-negative value are required");
     error.code = "BAD_INPUT";
     throw error;
   }
 
   await query(
-    "UPDATE tax_rules SET scope = ?, tax_percent = ?, is_active = ?, description = ? WHERE id = ?",
-    [scope, taxPercent, isActive, description, id]
+    "UPDATE tax_rules SET scope = ?, tax_percent = ?, charge_type = ?, applies_on = ?, is_active = ?, description = ? WHERE id = ?",
+    [scope, taxPercent, chargeType, appliesOn, isActive, description, id]
   );
 
   const rows = await query(
-    "SELECT id, scope, tax_percent, is_active, description, updated_at FROM tax_rules WHERE id = ?",
+    "SELECT id, scope, tax_percent, charge_type, applies_on, is_active, description, updated_at FROM tax_rules WHERE id = ?",
     [id]
   );
   return rows[0] || null;
