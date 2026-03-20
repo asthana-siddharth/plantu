@@ -53,6 +53,45 @@ function pretty(value) {
   return String(value);
 }
 
+function formatMoney(value) {
+  return `Rs ${Math.round(Number(value || 0))}`;
+}
+
+function normalizeOrderLineItems(row) {
+  if (!Array.isArray(row?.order_items) || row.order_items.length === 0) {
+    return [];
+  }
+
+  return row.order_items.map((item, index) => ({
+    id: item?.id != null ? String(item.id) : `line-${index}`,
+    type: String(item?.type || "product").toLowerCase() === "service" ? "service" : "product",
+    name: String(item?.name || "Item"),
+    quantity: Number(item?.quantity || 1),
+    lineTotal: Number(item?.lineTotal || 0),
+  }));
+}
+
+function getApplicableCharges(row, hasProducts, hasServices) {
+  if (!Array.isArray(row?.charge_breakdown)) {
+    return [];
+  }
+
+  const deliveryMode = String(row?.delivery_mode || "pickup").toLowerCase();
+
+  return row.charge_breakdown.filter((charge) => {
+    const key = String(charge?.key || "").toLowerCase();
+    const label = String(charge?.label || "").toLowerCase();
+    const isItemCharge = key.includes("item") || label.includes("item");
+    const isServiceCharge = key.includes("service") || label.includes("service");
+    const isTransportationCharge = key.includes("transport") || label.includes("transport");
+
+    if (isItemCharge && !hasProducts) return false;
+    if (isServiceCharge && !hasServices) return false;
+    if (isTransportationCharge && deliveryMode !== "delivery") return false;
+    return true;
+  });
+}
+
 function DataTable({ rows }) {
   if (!rows.length) return <p className="muted">No rows found</p>;
 
@@ -85,6 +124,7 @@ function OrdersTable({ rows, selectedOrderIds, onToggleOrder, onToggleAll }) {
   if (!rows.length) return <p className="muted">No rows found</p>;
 
   const allSelected = rows.length > 0 && rows.every((row) => selectedOrderIds.includes(String(row.id)));
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
 
   return (
     <div className="tableWrap">
@@ -100,27 +140,90 @@ function OrdersTable({ rows, selectedOrderIds, onToggleOrder, onToggleAll }) {
             <th>payment_status</th>
             <th>total</th>
             <th>next_statuses</th>
+            <th>details</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => {
             const orderId = String(row.id);
+            const lineItems = normalizeOrderLineItems(row);
+            const productItems = lineItems.filter((item) => item.type === "product");
+            const serviceItems = lineItems.filter((item) => item.type === "service");
+            const hasProducts = productItems.length > 0;
+            const hasServices = serviceItems.length > 0;
+            const applicableCharges = getApplicableCharges(row, hasProducts, hasServices);
+            const showDetails = expandedOrderId === orderId;
+
             return (
-              <tr key={orderId}>
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={selectedOrderIds.includes(orderId)}
-                    onChange={() => onToggleOrder(orderId)}
-                  />
-                </td>
-                <td>{pretty(row.id)}</td>
-                <td>{pretty(row.date)}</td>
-                <td>{pretty(row.status)}</td>
-                <td>{pretty(row.payment_status)}</td>
-                <td>{pretty(row.total)}</td>
-                <td>{Array.isArray(row.next_statuses) ? row.next_statuses.join(", ") : "-"}</td>
-              </tr>
+              <React.Fragment key={orderId}>
+                <tr>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderIds.includes(orderId)}
+                      onChange={() => onToggleOrder(orderId)}
+                    />
+                  </td>
+                  <td>{pretty(row.id)}</td>
+                  <td>{pretty(row.date)}</td>
+                  <td>{pretty(row.status)}</td>
+                  <td>{pretty(row.payment_status)}</td>
+                  <td>{pretty(row.total)}</td>
+                  <td>{Array.isArray(row.next_statuses) ? row.next_statuses.join(", ") : "-"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="detailBtn"
+                      onClick={() => setExpandedOrderId(showDetails ? null : orderId)}
+                    >
+                      {showDetails ? "Hide" : "View"}
+                    </button>
+                  </td>
+                </tr>
+                {showDetails ? (
+                  <tr>
+                    <td colSpan={9} className="orderDetailCell">
+                      <div className="orderDetailWrap">
+                        {hasProducts ? (
+                          <div className="orderDetailBlock">
+                            <strong>Products</strong>
+                            {productItems.map((item) => (
+                              <div key={`p-${item.id}`} className="orderDetailLine">
+                                <span>{`${item.name} x${item.quantity}`}</span>
+                                <span>{formatMoney(item.lineTotal)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {hasServices ? (
+                          <div className="orderDetailBlock">
+                            <strong>Services</strong>
+                            {serviceItems.map((item) => (
+                              <div key={`s-${item.id}`} className="orderDetailLine">
+                                <span>{`${item.name} x${item.quantity}`}</span>
+                                <span>{formatMoney(item.lineTotal)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {applicableCharges.length > 0 ? (
+                          <div className="orderDetailBlock">
+                            <strong>Applicable Charges</strong>
+                            {applicableCharges.map((charge, idx) => (
+                              <div key={`${orderId}-${idx}`} className="orderDetailLine">
+                                <span>{String(charge.label || charge.key || "Charge")}</span>
+                                <span>{formatMoney(charge.amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </React.Fragment>
             );
           })}
         </tbody>

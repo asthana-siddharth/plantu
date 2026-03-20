@@ -102,6 +102,9 @@ export default function CartScreen({ navigation }) {
       .filter((item) => isServiceItem(item))
       .reduce((sum, item) => sum + Number(item.price || 0), 0);
 
+    const hasItemProducts = state.items.some((item) => !isServiceItem(item));
+    const hasServiceProducts = state.items.some((item) => isServiceItem(item));
+
     const itemSgst = roundMoney((itemSubtotal * Number(taxConfig.itemSgstPercent || 0)) / 100);
     const itemCgst = roundMoney((itemSubtotal * Number(taxConfig.itemCgstPercent || 0)) / 100);
     const serviceSgst = roundMoney((serviceSubtotal * Number(taxConfig.serviceSgstPercent || 0)) / 100);
@@ -120,6 +123,8 @@ export default function CartScreen({ navigation }) {
       subtotal,
       itemSubtotal,
       serviceSubtotal,
+      hasItemProducts,
+      hasServiceProducts,
       itemSgst,
       itemCgst,
       serviceSgst,
@@ -263,22 +268,30 @@ export default function CartScreen({ navigation }) {
               <Text style={styles.summaryLabel}>Subtotal</Text>
               <Text style={styles.summaryValue}>₹{Math.round(summary.subtotal)}</Text>
             </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>SGST on Item ({summary.itemSgstPercent}%)</Text>
-              <Text style={styles.summaryValue}>₹{Math.round(summary.itemSgst)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>CGST on Item ({summary.itemCgstPercent}%)</Text>
-              <Text style={styles.summaryValue}>₹{Math.round(summary.itemCgst)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>SGST on Service ({summary.serviceSgstPercent}%)</Text>
-              <Text style={styles.summaryValue}>₹{Math.round(summary.serviceSgst)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>CGST on Service ({summary.serviceCgstPercent}%)</Text>
-              <Text style={styles.summaryValue}>₹{Math.round(summary.serviceCgst)}</Text>
-            </View>
+            {summary.hasItemProducts ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>SGST on Item ({summary.itemSgstPercent}%)</Text>
+                <Text style={styles.summaryValue}>₹{Math.round(summary.itemSgst)}</Text>
+              </View>
+            ) : null}
+            {summary.hasItemProducts ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>CGST on Item ({summary.itemCgstPercent}%)</Text>
+                <Text style={styles.summaryValue}>₹{Math.round(summary.itemCgst)}</Text>
+              </View>
+            ) : null}
+            {summary.hasServiceProducts ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>SGST on Service ({summary.serviceSgstPercent}%)</Text>
+                <Text style={styles.summaryValue}>₹{Math.round(summary.serviceSgst)}</Text>
+              </View>
+            ) : null}
+            {summary.hasServiceProducts ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>CGST on Service ({summary.serviceCgstPercent}%)</Text>
+                <Text style={styles.summaryValue}>₹{Math.round(summary.serviceCgst)}</Text>
+              </View>
+            ) : null}
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Platform Fee</Text>
               <Text style={styles.summaryValue}>₹{Math.round(summary.platformFee)}</Text>
@@ -300,10 +313,12 @@ export default function CartScreen({ navigation }) {
                 </TouchableOpacity>
               </View>
             </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Transportation Fee</Text>
-              <Text style={styles.summaryValue}>₹{Math.round(summary.transportationFee)}</Text>
-            </View>
+            {deliveryMode === "delivery" ? (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Transportation Fee</Text>
+                <Text style={styles.summaryValue}>₹{Math.round(summary.transportationFee)}</Text>
+              </View>
+            ) : null}
             <View style={styles.divider} />
             <View style={styles.summaryRow}>
               <Text style={styles.totalLabel}>Total</Text>

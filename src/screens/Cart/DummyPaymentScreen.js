@@ -37,24 +37,34 @@ export default function DummyPaymentScreen({ route, navigation }) {
         {summary ? (
           <View style={styles.summaryBlock}>
             <Text style={styles.summaryLine}>Subtotal: ₹{Math.round(Number(summary.subtotal || 0))}</Text>
-            <Text style={styles.summaryLine}>
-              SGST on Item ({Number(summary.itemSgstPercent || 0)}%): ₹{Math.round(Number(summary.itemSgst || 0))}
-            </Text>
-            <Text style={styles.summaryLine}>
-              CGST on Item ({Number(summary.itemCgstPercent || 0)}%): ₹{Math.round(Number(summary.itemCgst || 0))}
-            </Text>
-            <Text style={styles.summaryLine}>
-              SGST on Service ({Number(summary.serviceSgstPercent || 0)}%): ₹{Math.round(Number(summary.serviceSgst || 0))}
-            </Text>
-            <Text style={styles.summaryLine}>
-              CGST on Service ({Number(summary.serviceCgstPercent || 0)}%): ₹{Math.round(Number(summary.serviceCgst || 0))}
-            </Text>
+            {summary.hasItemProducts ? (
+              <Text style={styles.summaryLine}>
+                SGST on Item ({Number(summary.itemSgstPercent || 0)}%): ₹{Math.round(Number(summary.itemSgst || 0))}
+              </Text>
+            ) : null}
+            {summary.hasItemProducts ? (
+              <Text style={styles.summaryLine}>
+                CGST on Item ({Number(summary.itemCgstPercent || 0)}%): ₹{Math.round(Number(summary.itemCgst || 0))}
+              </Text>
+            ) : null}
+            {summary.hasServiceProducts ? (
+              <Text style={styles.summaryLine}>
+                SGST on Service ({Number(summary.serviceSgstPercent || 0)}%): ₹{Math.round(Number(summary.serviceSgst || 0))}
+              </Text>
+            ) : null}
+            {summary.hasServiceProducts ? (
+              <Text style={styles.summaryLine}>
+                CGST on Service ({Number(summary.serviceCgstPercent || 0)}%): ₹{Math.round(Number(summary.serviceCgst || 0))}
+              </Text>
+            ) : null}
             <Text style={styles.summaryLine}>
               Platform Fee: ₹{Math.round(Number(summary.platformFee || 0))}
             </Text>
-            <Text style={styles.summaryLine}>
-              Transportation Fee ({deliveryMode}): ₹{Math.round(Number(summary.transportationFee || 0))}
-            </Text>
+            {deliveryMode === "delivery" ? (
+              <Text style={styles.summaryLine}>
+                Transportation Fee ({deliveryMode}): ₹{Math.round(Number(summary.transportationFee || 0))}
+              </Text>
+            ) : null}
           </View>
         ) : null}
       </View>

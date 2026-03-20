@@ -88,6 +88,37 @@ export default function OrderDetailsScreen({ route, navigation }) {
 
   const productItems = useMemo(() => lineItems.filter((item) => item.type === "product"), [lineItems]);
   const serviceItems = useMemo(() => lineItems.filter((item) => item.type === "service"), [lineItems]);
+  const hasProductItems = productItems.length > 0;
+  const hasServiceItems = serviceItems.length > 0;
+  const deliveryMode = String(order?.deliveryMode || "pickup").toLowerCase();
+
+  const visibleChargeBreakdown = useMemo(() => {
+    if (!Array.isArray(order?.chargeBreakdown)) {
+      return [];
+    }
+
+    return order.chargeBreakdown.filter((charge) => {
+      const key = String(charge?.key || "").toLowerCase();
+      const label = String(charge?.label || "").toLowerCase();
+      const isItemCharge = key.includes("item") || label.includes("item");
+      const isServiceCharge = key.includes("service") || label.includes("service");
+      const isTransportationCharge = key.includes("transport") || label.includes("transport");
+
+      if (isItemCharge && !hasProductItems) {
+        return false;
+      }
+
+      if (isServiceCharge && !hasServiceItems) {
+        return false;
+      }
+
+      if (isTransportationCharge && deliveryMode !== "delivery") {
+        return false;
+      }
+
+      return true;
+    });
+  }, [order, hasProductItems, hasServiceItems, deliveryMode]);
 
   const openLineItemDetails = (item) => {
     if (item.type === "service") {
@@ -148,54 +179,56 @@ export default function OrderDetailsScreen({ route, navigation }) {
         <Text style={styles.meta}>Date: {order.date}</Text>
         <Text style={styles.meta}>Status: {order.status}</Text>
         <Text style={styles.meta}>Payment: {order.payment_status || "paid"}</Text>
-        <Text style={styles.meta}>Delivery Mode: {String(order.deliveryMode || "pickup")}</Text>
+        <Text style={styles.meta}>Delivery Mode: {deliveryMode}</Text>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Products</Text>
-        {productItems.length === 0 && <Text style={styles.emptyHint}>No products in this order.</Text>}
-        {productItems.map((item, index) => (
-          <TouchableOpacity
-            key={`product-${item.id || index}`}
-            style={styles.itemRow}
-            onPress={() => openLineItemDetails(item)}
-            activeOpacity={0.85}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>Qty: {item.quantity || 1} • Tap for details</Text>
-            </View>
-            <Text style={styles.itemPrice}>₹{Math.round(Number(item.lineTotal || 0))}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {hasProductItems ? (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Products</Text>
+          {productItems.map((item, index) => (
+            <TouchableOpacity
+              key={`product-${item.id || index}`}
+              style={styles.itemRow}
+              onPress={() => openLineItemDetails(item)}
+              activeOpacity={0.85}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <Text style={styles.itemMeta}>Qty: {item.quantity || 1} • Tap for details</Text>
+              </View>
+              <Text style={styles.itemPrice}>₹{Math.round(Number(item.lineTotal || 0))}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Services</Text>
-        {serviceItems.length === 0 && <Text style={styles.emptyHint}>No services in this order.</Text>}
-        {serviceItems.map((item, index) => (
-          <TouchableOpacity
-            key={`service-${item.id || index}`}
-            style={styles.itemRow}
-            onPress={() => openLineItemDetails(item)}
-            activeOpacity={0.85}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>Qty: {item.quantity || 1} • Tap for details</Text>
-            </View>
-            <Text style={styles.itemPrice}>₹{Math.round(Number(item.lineTotal || 0))}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {hasServiceItems ? (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Services</Text>
+          {serviceItems.map((item, index) => (
+            <TouchableOpacity
+              key={`service-${item.id || index}`}
+              style={styles.itemRow}
+              onPress={() => openLineItemDetails(item)}
+              activeOpacity={0.85}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemName}>{item.name}</Text>
+                <Text style={styles.itemMeta}>Qty: {item.quantity || 1} • Tap for details</Text>
+              </View>
+              <Text style={styles.itemPrice}>₹{Math.round(Number(item.lineTotal || 0))}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.totalLabel}>Subtotal</Text>
         <Text style={styles.totalMeta}>₹{Math.round(Number(order.subtotal ?? order.total ?? 0))}</Text>
         <Text style={styles.totalLabel}>Tax</Text>
         <Text style={styles.totalMeta}>₹{Math.round(Number(order.taxTotal || 0))}</Text>
-        {Array.isArray(order.chargeBreakdown) && order.chargeBreakdown.length > 0 ? (
-          order.chargeBreakdown.map((charge) => (
+        {visibleChargeBreakdown.length > 0 ? (
+          visibleChargeBreakdown.map((charge) => (
             <View key={String(charge.key || charge.label)} style={styles.chargeRow}>
               <Text style={styles.chargeLabel}>{charge.label}</Text>
               <Text style={styles.chargeValue}>₹{Math.round(Number(charge.amount || 0))}</Text>

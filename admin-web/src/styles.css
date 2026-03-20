@@ -136,6 +136,40 @@ th {
   font-weight: 700;
 }
 
+.detailBtn {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.orderDetailCell {
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.orderDetailWrap {
+  display: grid;
+  gap: 10px;
+}
+
+.orderDetailBlock {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.orderDetailLine {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 6px;
+  color: #334155;
+}
+
 .muted {
   color: #64748b;
 }
