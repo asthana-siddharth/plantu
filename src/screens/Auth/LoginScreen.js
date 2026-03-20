@@ -13,18 +13,19 @@ export default function LoginScreen({ navigation }) {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const handleSendOTP = async () => {
-    if (!phone || phone.length < 10) {
+    const normalizedPhone = String(phone || "").trim();
+    if (!normalizedPhone || normalizedPhone.length < 10) {
       Alert.alert("Error", "Please enter a valid phone number");
       return;
     }
 
     setLoading(true);
     try {
-      await sendOtp(phone);
-      navigation.navigate("OTP", { phone });
+      await sendOtp(normalizedPhone);
+      navigation.navigate("OTP", { phone: normalizedPhone });
       setLoading(false);
     } catch (error) {
-      Alert.alert("Error", "Failed to send OTP");
+      Alert.alert("Error", error?.response?.data?.message || "Failed to send OTP");
       setLoading(false);
     }
   };
