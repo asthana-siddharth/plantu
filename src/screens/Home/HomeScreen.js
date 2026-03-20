@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -10,10 +11,11 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { AuthContext } from "../../context/AuthContext";
+import { APP_VERSION } from "../../config/constants";
 
 export default function HomeScreen() {
   const navigation = useNavigation();
-  const { state: authState } = React.useContext(AuthContext);
+  const { state: authState, dispatch } = React.useContext(AuthContext);
   const [menuVisible, setMenuVisible] = React.useState(false);
 
   React.useEffect(() => {
@@ -62,6 +64,20 @@ export default function HomeScreen() {
         break;
     }
   };
+
+  function handleLogout() {
+    Alert.alert("Logout", "Do you want to logout?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: () => {
+          setMenuVisible(false);
+          dispatch({ type: "SIGN_OUT" });
+        },
+      },
+    ]);
+  }
 
   return (
     <ScrollView style={styles.container}>
@@ -171,6 +187,12 @@ export default function HomeScreen() {
             >
               <Text style={styles.menuItemText}>Refer and Earn</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
+              <Text style={[styles.menuItemText, styles.logoutText]}>Logout</Text>
+            </TouchableOpacity>
+            <View style={styles.menuVersionWrap}>
+              <Text style={styles.menuVersionText}>{APP_VERSION}</Text>
+            </View>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -319,5 +341,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#2d3f2d",
+  },
+  logoutText: {
+    color: "#C62828",
+  },
+  menuVersionWrap: {
+    borderTopWidth: 1,
+    borderTopColor: "#e8eee8",
+    marginTop: 6,
+    paddingTop: 8,
+    paddingBottom: 4,
+    alignItems: "center",
+  },
+  menuVersionText: {
+    fontSize: 12,
+    color: "#7c8b7c",
+    fontWeight: "600",
   },
 });

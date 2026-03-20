@@ -238,7 +238,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [orderId, setOrderId] = useState("");
-  const [orderStatus, setOrderStatus] = useState("Confirmed");
   const [bulkOrderStatus, setBulkOrderStatus] = useState("Confirmed");
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [inventoryId, setInventoryId] = useState("");
@@ -406,7 +405,7 @@ export default function App() {
     event.preventDefault();
     if (!orderId.trim()) return;
     try {
-      await patchOrderStatus(orderId.trim(), orderStatus.trim());
+      await patchOrderStatus(orderId.trim(), bulkOrderStatus.trim());
       await loadModule(active, buildQueryParams());
       setOrderId("");
     } catch (err) {
@@ -670,16 +669,6 @@ export default function App() {
                 value={orderId}
                 onChange={(e) => setOrderId(e.target.value)}
               />
-              <select
-                value={orderStatus}
-                onChange={(e) => setOrderStatus(e.target.value)}
-              >
-                {ORDER_STATUSES.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
               <button type="submit">Update One Order</button>
             </form>
           </>
