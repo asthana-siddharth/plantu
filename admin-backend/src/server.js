@@ -147,6 +147,9 @@ app.patch("/admin/orders/:id/status", async (req, res) => {
     if (!updated) return fail(res, 404, "Order not found");
     return ok(res, updated);
   } catch (error) {
+    if (error.code === "INVALID_STATUS" || error.code === "INVALID_TRANSITION") {
+      return fail(res, 400, error.message);
+    }
     return fail(res, 500, `Failed to update order status: ${error.message}`);
   }
 });

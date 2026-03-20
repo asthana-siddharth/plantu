@@ -16,7 +16,7 @@ import { CartContext } from "../../context/CartContext";
 
 export default function ShopScreen() {
   const navigation = useNavigation();
-  const { dispatch } = useContext(CartContext);
+  const { state, dispatch } = useContext(CartContext);
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +63,14 @@ export default function ShopScreen() {
     filterProducts();
   }, [searchQuery, selectedCategory, products]);
 
+  const cartQuantityMap = React.useMemo(() => {
+    const nextMap = {};
+    state.items.forEach((item) => {
+      nextMap[item.id] = item.quantity;
+    });
+    return nextMap;
+  }, [state.items]);
+
   const filterProducts = () => {
     let filtered = products;
 
@@ -101,23 +109,62 @@ export default function ShopScreen() {
         </View>
         <View style={styles.priceContainer}>
           <Text style={styles.price}>₹{item.price}</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            disabled={!item.inStock}
-            onPress={(event) => {
-              event?.stopPropagation?.();
+          <View style={styles.quantityBox}>
+            <TouchableOpacity
+              style={styles.quantityAction}
+              disabled={!item.inStock || !cartQuantityMap[`product-${item.id}`]}
+              onPress={(event) => {
+                event?.stopPropagation?.();
 
-              dispatch({
-                type: "ADD_TO_CART",
-                payload: { product: item, quantity: 1 },
-              });
+                const currentQty = Number(cartQuantityMap[`product-${item.id}`] || 0);
+                if (currentQty <= 1) {
+                  dispatch({ type: "REMOVE_FROM_CART", payload: `product-${item.id}` });
+                  return;
+                }
 
-              Alert.alert("Added", `${item.name} added to cart`);
-            }}
-          >
-            <Text style={styles.addButtonText}>+</Text>
-          </TouchableOpacity>
+                dispatch({
+                  type: "UPDATE_QUANTITY",
+                  payload: {
+                    itemId: `product-${item.id}`,
+                    quantity: currentQty - 1,
+                  },
+                });
+              }}
+            >
+              <Text style={styles.quantityActionText}>-</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.quantityValue}>{cartQuantityMap[`product-${item.id}`] || 0}</Text>
+
+            <TouchableOpacity
+              style={styles.quantityAction}
+              disabled={!item.inStock}
+              onPress={(event) => {
+                event?.stopPropagation?.();
+
+                const currentQty = Number(cartQuantityMap[`product-${item.id}`] || 0);
+                if (currentQty >= Number(item.stockQty || 0)) {
+                  Alert.alert("Stock limit", `Only ${item.stockQty} units are available`);
+                  return;
+                }
+
+                dispatch({
+                  type: "ADD_TO_CART",
+                  payload: {
+                    itemId: `product-${item.id}`,
+                    product: item,
+                    quantity: 1,
+                    productType: "product",
+                    maxQuantity: item.stockQty,
+                  },
+                });
+              }}
+            >
+              <Text style={styles.quantityActionText}>+</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+        <Text style={styles.stockText}>Available: {item.stockQty || 0}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -313,18 +360,32 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#4CAF50",
   },
-  addButton: {
-    width: 32,
-    height: 32,
-    backgroundColor: "#4CAF50",
-    borderRadius: 8,
-    justifyContent: "center",
+  quantityBox: {
+    flexDirection: "row",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#c7dfc7",
+    borderRadius: 8,
   },
-  addButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+  quantityAction: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  quantityActionText: {
+    color: "#1f6f45",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  quantityValue: {
+    minWidth: 18,
+    textAlign: "center",
+    fontWeight: "700",
+    color: "#234",
+  },
+  stockText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#687",
   },
   emptyContainer: {
     flex: 1,

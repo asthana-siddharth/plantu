@@ -9,10 +9,11 @@ import {
   Alert,
 } from "react-native";
 import { CartContext } from "../../context/CartContext";
-import { createOrder } from "../../services/orderService";
+import { AuthContext } from "../../context/AuthContext";
 
 export default function CartScreen({ navigation }) {
   const { state, dispatch } = useContext(CartContext);
+  const { state: authState } = useContext(AuthContext);
 
   const handleRemoveItem = (itemId) => {
     Alert.alert("Remove Item", "Are you sure?", [
@@ -30,20 +31,20 @@ export default function CartScreen({ navigation }) {
       return;
     }
 
-    try {
-      await createOrder(state.items);
-      Alert.alert("Order Placed", "Your order has been confirmed!", [
+    if (!authState.user?.profileCompleted) {
+      Alert.alert("Complete Profile", "Please complete your profile before placing an order.", [
         {
-          text: "OK",
-          onPress: () => {
-            dispatch({ type: "CLEAR_CART" });
-            navigation.navigate("Orders");
-          },
+          text: "Go to Profile",
+          onPress: () => navigation.navigate("Profile", { requireCompletion: true }),
         },
       ]);
-    } catch (error) {
-      Alert.alert("Error", "Failed to place order. Please try again.");
+      return;
     }
+
+    navigation.navigate("DummyPayment", {
+      cartItems: state.items,
+      payable: Math.round(state.totalPrice * 1.18),
+    });
   };
 
   const CartItem = ({ item }) => (
@@ -54,6 +55,7 @@ export default function CartScreen({ navigation }) {
       <View style={styles.itemDetails}>
         <Text style={styles.itemName}>{item.product.name}</Text>
         <Text style={styles.itemPrice}>₹{item.product.price}</Text>
+        {item.productType === "service" && <Text style={styles.serviceTag}>Service</Text>}
         <View style={styles.quantityControls}>
           <TouchableOpacity
             onPress={() =>
@@ -73,6 +75,7 @@ export default function CartScreen({ navigation }) {
                 payload: { itemId: item.id, quantity: item.quantity + 1 },
               })
             }
+            disabled={item.quantity >= (item.maxQuantity || 1)}
           >
             <Text style={styles.quantityButton}>+</Text>
           </TouchableOpacity>
@@ -253,6 +256,12 @@ const styles = StyleSheet.create({
     color: "#4CAF50",
     fontWeight: "600",
     marginBottom: 8,
+  },
+  serviceTag: {
+    color: "#5E35B1",
+    fontSize: 11,
+    marginBottom: 8,
+    fontWeight: "600",
   },
   quantityControls: {
     flexDirection: "row",

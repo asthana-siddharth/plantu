@@ -10,6 +10,16 @@ const modules = [
   { key: "promotions", label: "Promotions", path: "/admin/promotions" },
 ];
 
+const ORDER_STATUSES = [
+  "Placed",
+  "Confirmed",
+  "Packed",
+  "Shipped",
+  "Out for Delivery",
+  "Delivered",
+  "Cancelled",
+];
+
 function pretty(value) {
   if (value == null) return "-";
   if (Array.isArray(value)) return value.join(", ");
@@ -51,7 +61,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [orderId, setOrderId] = useState("");
-  const [orderStatus, setOrderStatus] = useState("Processing");
+  const [orderStatus, setOrderStatus] = useState("Confirmed");
   const [inventoryId, setInventoryId] = useState("");
   const [inventoryQty, setInventoryQty] = useState("");
 
@@ -133,11 +143,16 @@ export default function App() {
               value={orderId}
               onChange={(e) => setOrderId(e.target.value)}
             />
-            <input
-              placeholder="Status"
+            <select
               value={orderStatus}
               onChange={(e) => setOrderStatus(e.target.value)}
-            />
+            >
+              {ORDER_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
             <button type="submit">Update Status</button>
           </form>
         )}

@@ -12,10 +12,16 @@ const {
   listOrdersFromPrimary,
   getOrderByIdFromPrimary,
   getNextOrderNumber,
+  getProductStockById,
+  decrementProductStock,
   createOrderInPrimary,
   withPrimaryTransaction,
   checkPrimaryHealth,
   checkSecondaryHealth,
+  findOrCreateUserByPhone,
+  getUserById,
+  updateUserProfile,
+  listServices,
 } = require("./db");
 
 const app = express();
@@ -38,6 +44,49 @@ function getTodayLongDate() {
     month: "long",
     day: "numeric",
   });
+}
+
+function parseToken(req) {
+  const authHeader = String(req.headers.authorization || "").trim();
+  if (!authHeader.toLowerCase().startsWith("bearer ")) {
+    return "";
+  }
+
+  return authHeader.slice(7).trim();
+}
+
+function parseUserIdFromToken(token) {
+  if (!token.startsWith("dev-token-")) {
+    return "";
+  }
+
+  const phone = token.slice("dev-token-".length).trim();
+  return phone ? `user-${phone}` : "";
+}
+
+async function requireAuth(req, res, next) {
+  const token = parseToken(req);
+  const userId = parseUserIdFromToken(token);
+
+  if (!token || !userId) {
+    return fail(res, 401, "Unauthorized");
+  }
+
+  const user = await getUserById(userId);
+  if (!user) {
+    return fail(res, 401, "Invalid user");
+  }
+
+  req.auth = {
+    token,
+    user,
+  };
+
+  return next();
+}
+
+function normalizeOrderStatus(status) {
+  return String(status || "").trim() || "Placed";
 }
 
 app.get("/health", (_req, res) => {
@@ -93,7 +142,7 @@ app.post("/auth/resend-otp", (req, res) => {
   });
 });
 
-app.post("/auth/verify-otp", (req, res) => {
+app.post("/auth/verify-otp", async (req, res) => {
   const { phone, otp } = req.body || {};
   if (!phone || !otp) {
     return fail(res, 400, "phone and otp are required");
@@ -103,14 +152,15 @@ app.post("/auth/verify-otp", (req, res) => {
     return fail(res, 401, "Invalid OTP");
   }
 
-  return ok(res, {
-    token: `dev-token-${String(phone)}`,
-    user: {
-      id: `user-${String(phone)}`,
-      phone: String(phone),
-      name: "Plantu User",
-    },
-  });
+  try {
+    const user = await findOrCreateUserByPhone(phone);
+    return ok(res, {
+      token: `dev-token-${String(phone)}`,
+      user,
+    });
+  } catch (error) {
+    return fail(res, 500, `Failed to verify OTP: ${error.message}`);
+  }
 });
 
 app.get("/products", async (req, res) => {
@@ -134,6 +184,14 @@ app.get("/products/:id", async (req, res) => {
     return ok(res, product);
   } catch (error) {
     return fail(res, 500, `Failed to fetch product: ${error.message}`);
+  }
+});
+
+app.get("/services", async (_req, res) => {
+  try {
+    return ok(res, await listServices());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch services: ${error.message}`);
   }
 });
 
@@ -174,18 +232,35 @@ app.patch("/devices/:id", async (req, res) => {
   }
 });
 
-app.get("/orders", async (_req, res) => {
+app.get("/me/profile", requireAuth, async (req, res) => {
+  return ok(res, req.auth.user);
+});
+
+app.put("/me/profile", requireAuth, async (req, res) => {
   try {
-    const items = await listOrdersFromPrimary();
+    const updated = await updateUserProfile(req.auth.user.id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "User not found");
+    }
+
+    return ok(res, updated);
+  } catch (error) {
+    return fail(res, 500, `Failed to update profile: ${error.message}`);
+  }
+});
+
+app.get("/orders", requireAuth, async (req, res) => {
+  try {
+    const items = await listOrdersFromPrimary(req.auth.user.id);
     return ok(res, items);
   } catch (error) {
     return fail(res, 500, `Failed to fetch orders from MySQL: ${error.message}`);
   }
 });
 
-app.get("/orders/:id", async (req, res) => {
+app.get("/orders/:id", requireAuth, async (req, res) => {
   try {
-    const item = await getOrderByIdFromPrimary(req.params.id);
+    const item = await getOrderByIdFromPrimary(req.params.id, req.auth.user.id);
     if (!item) {
       return fail(res, 404, "Order not found");
     }
@@ -196,30 +271,91 @@ app.get("/orders/:id", async (req, res) => {
   }
 });
 
-app.post("/orders", async (req, res) => {
+app.post("/orders", requireAuth, async (req, res) => {
   const { items } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) {
     return fail(res, 400, "Order requires at least one item");
   }
 
-  const total = items.reduce((sum, item) => {
-    const quantity = Number(item.quantity || 0);
-    const price = Number(item.product?.price || item.price || 0);
-    return sum + quantity * price;
-  }, 0);
+  if (!req.auth.user.profileCompleted) {
+    return fail(res, 400, "Complete profile before placing order");
+  }
 
   try {
     const nextNum = await getNextOrderNumber();
+    const orderId = `ORD${String(nextNum).padStart(3, "0")}`;
+    const normalizedItems = [];
+
+    let total = 0;
+    let totalUnits = 0;
+
+    for (const item of items) {
+      const type = String(item.productType || item.type || "product");
+      const quantity = Math.max(1, Number(item.quantity || 1));
+
+      if (type === "service") {
+        const linePrice = Number(item.product?.price || item.price || 0);
+        const title = item.product?.name || item.product?.title || "Service";
+        normalizedItems.push({
+          type,
+          id: String(item.product?.id || item.id || title),
+          name: title,
+          unitPrice: linePrice,
+          quantity,
+          lineTotal: linePrice * quantity,
+        });
+        total += linePrice * quantity;
+        totalUnits += quantity;
+        continue;
+      }
+
+      const productId = Number(item.product?.id || item.id);
+      const stockRow = await getProductStockById(productId);
+      if (!stockRow) {
+        return fail(res, 400, `Product ${productId} not found`);
+      }
+
+      if (Number(stockRow.stock_qty) < quantity) {
+        return fail(res, 400, `Insufficient inventory for ${stockRow.name}`);
+      }
+
+      const linePrice = Number(item.product?.price || stockRow.price || 0);
+      normalizedItems.push({
+        type: "product",
+        id: productId,
+        name: item.product?.name || stockRow.name,
+        unitPrice: linePrice,
+        quantity,
+        lineTotal: linePrice * quantity,
+      });
+      total += linePrice * quantity;
+      totalUnits += quantity;
+    }
+
     const order = {
-      id: `ORD${String(nextNum).padStart(3, "0")}`,
+      id: orderId,
       date: getTodayLongDate(),
-      status: "Processing",
-      items: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+      status: normalizeOrderStatus(req.body?.status),
+      items: totalUnits,
       total,
-      items_list: items.map((item) => item.product?.name || "Item"),
+      items_list: normalizedItems.map((item) => item.name),
+      order_items: normalizedItems,
+      user_id: req.auth.user.id,
+      payment_status: "paid",
     };
 
     await withPrimaryTransaction(async (connection) => {
+      for (const item of normalizedItems) {
+        if (item.type !== "product") {
+          continue;
+        }
+
+        const reduced = await decrementProductStock(item.id, item.quantity, connection);
+        if (!reduced) {
+          throw new Error(`Insufficient inventory for product ${item.id}`);
+        }
+      }
+
       await createOrderInPrimary(order, connection);
     });
 

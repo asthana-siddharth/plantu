@@ -17,11 +17,23 @@ export default function ProductDetailScreen({ route, navigation }) {
   const { dispatch } = useContext(CartContext);
 
   const handleAddToCart = () => {
+    const maxAllowed = Number(product.stockQty || 0);
+    if (quantity > maxAllowed) {
+      Alert.alert("Stock limit", `Only ${maxAllowed} units are available`);
+      return;
+    }
+
     setAddingToCart(true);
     setTimeout(() => {
       dispatch({
         type: "ADD_TO_CART",
-        payload: { product, quantity },
+        payload: {
+          itemId: `product-${product.id}`,
+          product,
+          quantity,
+          productType: "product",
+          maxQuantity: maxAllowed,
+        },
       });
       Alert.alert(
         "Success",
@@ -115,7 +127,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             </TouchableOpacity>
             <Text style={styles.quantityValue}>{quantity}</Text>
             <TouchableOpacity
-              onPress={() => setQuantity(quantity + 1)}
+              onPress={() => setQuantity(Math.min(Number(product.stockQty || 1), quantity + 1))}
               style={styles.quantityButton}
             >
               <Text style={styles.quantityButtonText}>+</Text>

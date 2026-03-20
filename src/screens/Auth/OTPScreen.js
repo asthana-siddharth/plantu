@@ -36,6 +36,7 @@ export default function OTPScreen({ route, navigation }) {
       dispatch({
         type: "SIGN_IN",
         payload: response.token,
+        user: response.user,
       });
       setLoading(false);
     } catch (error) {

@@ -1,163 +1,134 @@
-import React, { useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
+  ActivityIndicator,
   Alert,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-
-const SERVICES = [
-  { id: "balcony", title: "Balcony Garden", price: 499 },
-  { id: "villa", title: "Villa / Lawn", price: 899 },
-  { id: "office", title: "Office Space", price: 699 },
-];
+import { CartContext } from "../../context/CartContext";
+import { getServices } from "../../services/serviceCatalogService";
 
 export default function GardenerBookingScreen() {
-  const [selectedService, setSelectedService] = useState(SERVICES[0].id);
-  const [date, setDate] = useState(new Date());
-  const [showPicker, setShowPicker] = useState(false);
-  const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { dispatch } = useContext(CartContext);
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleBook = () => {
-    setLoading(true);
-    // TODO: replace with real API call
-    setTimeout(() => {
-      Alert.alert(
-        "Booked",
-        `Your ${SERVICES.find((s) => s.id === selectedService).title} service is confirmed for ${date.toLocaleString()}.`
-      );
-      setLoading(false);
-    }, 1000);
+  useEffect(() => {
+    async function loadServices() {
+      try {
+        const response = await getServices();
+        setServices(response);
+      } catch (_error) {
+        setServices([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadServices();
+  }, []);
+
+  const handleAddService = (service) => {
+    dispatch({
+      type: "ADD_TO_CART",
+      payload: {
+        itemId: `service-${service.id}`,
+        productType: "service",
+        maxQuantity: 1,
+        quantity: 1,
+        product: {
+          id: service.id,
+          name: service.title,
+          price: Number(service.price),
+          image: "🧑‍🌾",
+        },
+      },
+    });
+
+    Alert.alert("Added", `${service.title} added to cart`);
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
-      <Text style={styles.heading}>Book Gardener Service</Text>
+      <Text style={styles.heading}>Gardener Services</Text>
+      <Text style={styles.caption}>Pick a service and add it to cart to purchase.</Text>
 
-      <Text style={styles.label}>Service type</Text>
-      {SERVICES.map((service) => (
-        <TouchableOpacity
-          key={service.id}
-          style={[
-            styles.option,
-            selectedService === service.id && styles.optionActive,
-          ]}
-          onPress={() => setSelectedService(service.id)}
-        >
-          <Text
-            style={[
-              styles.optionText,
-              selectedService === service.id && styles.optionTextActive,
-            ]}
-          >
-            {service.title} – ₹{service.price}
-          </Text>
-        </TouchableOpacity>
+      {services.map((service) => (
+        <View key={service.id} style={styles.card}>
+          <Text style={styles.title}>{service.title}</Text>
+          <Text style={styles.description}>{service.description}</Text>
+          <View style={styles.bottomRow}>
+            <Text style={styles.price}>₹{service.price}</Text>
+            <TouchableOpacity style={styles.bookButton} onPress={() => handleAddService(service)}>
+              <Text style={styles.bookButtonText}>Add to Cart</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       ))}
-
-      <Text style={styles.label}>Preferred date & time</Text>
-      <TouchableOpacity
-        style={styles.dateButton}
-        onPress={() => setShowPicker(true)}
-      >
-        <Text style={styles.dateText}>{date.toLocaleString()}</Text>
-      </TouchableOpacity>
-      {showPicker && (
-        <DateTimePicker
-          value={date}
-          mode="datetime"
-          display="default"
-          onChange={(e, selected) => {
-            setShowPicker(false);
-            if (selected) setDate(selected);
-          }}
-        />
-      )}
-
-      <Text style={styles.label}>Additional notes</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="e.g. bring tools, focus on pruning"
-        value={notes}
-        onChangeText={setNotes}
-        multiline
-      />
-
-      <TouchableOpacity
-        style={[styles.bookButton, loading && styles.bookButtonDisabled]}
-        onPress={handleBook}
-        disabled={loading}
-      >
-        <Text style={styles.bookButtonText}>
-          {loading ? "Booking…" : "Confirm Booking"}
-        </Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
+  loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
   heading: {
     fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 20,
+    marginBottom: 6,
     color: "#333",
   },
-  label: {
+  caption: {
     fontSize: 14,
-    fontWeight: "600",
-    marginTop: 20,
-    marginBottom: 8,
-    color: "#555",
+    color: "#667",
+    marginBottom: 14,
   },
-  option: {
+  card: {
     padding: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#dfe9df",
     marginBottom: 10,
+    backgroundColor: "#f7fbf7",
   },
-  optionActive: { backgroundColor: "#E8F5E9", borderColor: "#4CAF50" },
-  optionText: { fontSize: 16, color: "#333" },
-  optionTextActive: { color: "#4CAF50", fontWeight: "600" },
-  dateButton: {
-    padding: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#ccc",
-  },
-  dateText: {
+  title: {
     fontSize: 16,
-    color: "#333",
+    fontWeight: "700",
+    color: "#233",
   },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    minHeight: 80,
-    textAlignVertical: "top",
+  description: {
+    fontSize: 13,
+    color: "#667",
+    marginTop: 6,
   },
+  bottomRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  price: { fontSize: 18, fontWeight: "700", color: "#1f6f45" },
   bookButton: {
     backgroundColor: "#4CAF50",
-    padding: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderRadius: 8,
     alignItems: "center",
-    marginTop: 30,
-  },
-  bookButtonDisabled: {
-    backgroundColor: "#ccc",
   },
   bookButtonText: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
   },
 });

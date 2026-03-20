@@ -19,6 +19,19 @@ jest.mock('@react-navigation/stack', () => ({
   }),
 }));
 
+jest.mock('@react-navigation/bottom-tabs', () => ({
+  createBottomTabNavigator: () => ({
+    Navigator: ({ children }) => children,
+    Screen: ({ children }) => children,
+  }),
+}));
+
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(() => Promise.resolve(null)),
+  setItem: jest.fn(() => Promise.resolve()),
+  removeItem: jest.fn(() => Promise.resolve()),
+}));
+
 try {
   require('@testing-library/jest-native/extend-expect');
 } catch (e) {

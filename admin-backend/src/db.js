@@ -2,6 +2,16 @@ const mysql = require("mysql2/promise");
 
 let pool;
 
+const ORDER_FLOW = {
+  Placed: ["Confirmed", "Cancelled"],
+  Confirmed: ["Packed", "Cancelled"],
+  Packed: ["Shipped", "Cancelled"],
+  Shipped: ["Out for Delivery"],
+  "Out for Delivery": ["Delivered"],
+  Delivered: [],
+  Cancelled: [],
+};
+
 function getDbConfig() {
   return {
     host: process.env.DB_HOST || process.env.DB_PRIMARY_HOST || "127.0.0.1",
@@ -226,14 +236,43 @@ async function listCustomers() {
 
 async function listOrders() {
   const rows = await query("SELECT * FROM orders ORDER BY created_at DESC");
-  return rows.map((row) => ({ ...row, items_list: parseList(row.items_list) }));
+  return rows.map((row) => ({
+    ...row,
+    items_list: parseList(row.items_list),
+    order_items: parseList(row.order_items),
+    next_statuses: ORDER_FLOW[row.status] || [],
+  }));
 }
 
 async function updateOrderStatus(id, status) {
-  await query("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+  const existingRows = await query("SELECT * FROM orders WHERE id = ?", [id]);
+  if (!existingRows.length) return null;
+
+  const currentStatus = String(existingRows[0].status || "Placed");
+  const nextStatuses = ORDER_FLOW[currentStatus] || [];
+  const normalizedStatus = String(status || "").trim();
+
+  if (!ORDER_FLOW[normalizedStatus]) {
+    const error = new Error("Unsupported order status");
+    error.code = "INVALID_STATUS";
+    throw error;
+  }
+
+  if (normalizedStatus !== currentStatus && !nextStatuses.includes(normalizedStatus)) {
+    const error = new Error(`Invalid transition from ${currentStatus} to ${normalizedStatus}`);
+    error.code = "INVALID_TRANSITION";
+    throw error;
+  }
+
+  await query("UPDATE orders SET status = ? WHERE id = ?", [normalizedStatus, id]);
   const rows = await query("SELECT * FROM orders WHERE id = ?", [id]);
   if (!rows.length) return null;
-  return { ...rows[0], items_list: parseList(rows[0].items_list) };
+  return {
+    ...rows[0],
+    items_list: parseList(rows[0].items_list),
+    order_items: parseList(rows[0].order_items),
+    next_statuses: ORDER_FLOW[rows[0].status] || [],
+  };
 }
 
 async function listVendors() {

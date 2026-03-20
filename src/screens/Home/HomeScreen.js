@@ -1,16 +1,31 @@
-import React, { useContext } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
+  Modal,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { AuthContext } from "../../context/AuthContext";
 
 export default function HomeScreen() {
   const navigation = useNavigation();
+  const { state: authState } = React.useContext(AuthContext);
+  const [menuVisible, setMenuVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!authState?.user || authState.user.profileCompleted) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      navigation.navigate("Profile", { requireCompletion: true });
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [authState?.user?.profileCompleted]);
 
   const features = [
     {
@@ -51,8 +66,15 @@ export default function HomeScreen() {
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.greeting}>Welcome to Plantu 🌿</Text>
-        <Text style={styles.subtitle}>Grow smarter, not harder</Text>
+        <View style={styles.headerTopRow}>
+          <View>
+            <Text style={styles.greeting}>Welcome to Plantu 🌿</Text>
+            <Text style={styles.subtitle}>Grow smarter, not harder</Text>
+          </View>
+          <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+            <Text style={styles.menuButtonText}>☰</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Features Grid */}
@@ -96,6 +118,58 @@ export default function HomeScreen() {
       >
         <Text style={styles.ctaText}>Browse Plants Now</Text>
       </TouchableOpacity>
+
+      <Modal transparent visible={menuVisible} animationType="fade" onRequestClose={() => setMenuVisible(false)}>
+        <TouchableOpacity style={styles.menuBackdrop} onPress={() => setMenuVisible(false)}>
+          <View style={styles.menuPanel}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate("OrderSummary");
+              }}
+            >
+              <Text style={styles.menuItemText}>Order Summary</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate("InfoPage", { pageKey: "about" });
+              }}
+            >
+              <Text style={styles.menuItemText}>About Us</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate("Profile");
+              }}
+            >
+              <Text style={styles.menuItemText}>Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate("InfoPage", { pageKey: "help" });
+              }}
+            >
+              <Text style={styles.menuItemText}>Help Center & FAQ</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                navigation.navigate("InfoPage", { pageKey: "refer" });
+              }}
+            >
+              <Text style={styles.menuItemText}>Refer and Earn</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 }
@@ -108,6 +182,25 @@ const styles = StyleSheet.create({
   header: {
     padding: 20,
     paddingTop: 40,
+  },
+  headerTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  menuButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#d6e6d6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuButtonText: {
+    fontSize: 20,
+    color: "#355a35",
+    lineHeight: 22,
   },
   greeting: {
     fontSize: 28,
@@ -188,5 +281,29 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.2)",
+    alignItems: "flex-end",
+    paddingTop: 60,
+    paddingRight: 16,
+  },
+  menuPanel: {
+    width: 240,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#dfe8df",
+    paddingVertical: 8,
+  },
+  menuItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2d3f2d",
   },
 });

@@ -8,7 +8,6 @@ import HomeScreen from "../screens/Home/HomeScreen";
 import ShopScreen from "../screens/Shop/ShopScreen";
 import ProductDetailScreen from "../screens/Shop/ProductDetailScreen";
 import CartScreen from "../screens/Cart/CartScreen";
-import OrdersScreen from "../screens/Orders/OrdersScreen";
 import GardenerBookingScreen from "../screens/Services/GardenerBookingScreen";
 import IrrigationControlScreen from "../screens/SmartCare/IrrigationControlScreen";
 import ProfileScreen from "../screens/Profile/ProfileScreen";
@@ -21,15 +20,6 @@ function ShopStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ShopList" component={ShopScreen} />
       <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-    </Stack.Navigator>
-  );
-}
-
-function CartStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="CartList" component={CartScreen} />
-      <Stack.Screen name="Orders" component={OrdersScreen} />
     </Stack.Navigator>
   );
 }
@@ -63,7 +53,7 @@ export default function BottomTabs() {
       />
       <Tab.Screen
         name="Cart"
-        component={CartStack}
+        component={CartScreen}
         options={{
           tabBarLabel: "Cart",
           tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🛒</Text>,

@@ -8,6 +8,7 @@ const products = [
     image: "plant",
     description: "Beautiful indoor plant with large leaves",
     inStock: true,
+    stockQty: 30,
   },
   {
     id: 2,
@@ -18,6 +19,7 @@ const products = [
     image: "plant",
     description: "Low maintenance, air-purifying plant",
     inStock: true,
+    stockQty: 20,
   },
   {
     id: 3,
@@ -28,6 +30,7 @@ const products = [
     image: "pot",
     description: "Elegant ceramic pot with drainage",
     inStock: true,
+    stockQty: 40,
   },
   {
     id: 4,
@@ -38,6 +41,7 @@ const products = [
     image: "seed",
     description: "Hybrid tomato seeds, high yield",
     inStock: true,
+    stockQty: 100,
   },
   {
     id: 5,
@@ -48,6 +52,7 @@ const products = [
     image: "tool",
     description: "Professional stainless steel pruner",
     inStock: true,
+    stockQty: 18,
   },
   {
     id: 6,
@@ -58,6 +63,7 @@ const products = [
     image: "plant",
     description: "Trailing plant, perfect for hanging",
     inStock: false,
+    stockQty: 0,
   },
 ];
 
@@ -74,6 +80,11 @@ const orders = [
     items: 3,
     total: 1299,
     items_list: ["Monstera Deliciosa", "Ceramic Pot 6inch", "Snake Plant"],
+    order_items: [
+      { type: "product", id: 1, name: "Monstera Deliciosa", unitPrice: 599, quantity: 1, lineTotal: 599 },
+      { type: "product", id: 3, name: "Ceramic Pot 6inch", unitPrice: 249, quantity: 1, lineTotal: 249 },
+      { type: "product", id: 2, name: "Snake Plant", unitPrice: 399, quantity: 1, lineTotal: 399 },
+    ],
   },
   {
     id: "ORD002",
@@ -82,6 +93,10 @@ const orders = [
     items: 2,
     total: 648,
     items_list: ["Tomato Seeds", "Garden Pruner"],
+    order_items: [
+      { type: "product", id: 4, name: "Tomato Seeds", unitPrice: 49, quantity: 1, lineTotal: 49 },
+      { type: "product", id: 5, name: "Garden Pruner", unitPrice: 299, quantity: 2, lineTotal: 598 },
+    ],
   },
   {
     id: "ORD003",
@@ -90,6 +105,9 @@ const orders = [
     items: 1,
     total: 599,
     items_list: ["Pothos Plant"],
+    order_items: [
+      { type: "product", id: 6, name: "Pothos Plant", unitPrice: 599, quantity: 1, lineTotal: 599 },
+    ],
   },
 ];
 

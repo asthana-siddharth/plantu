@@ -21,6 +21,15 @@ const API = axios.create({
 	},
 });
 
+export function setAuthToken(token) {
+	if (!token) {
+		delete API.defaults.headers.common.Authorization;
+		return;
+	}
+
+	API.defaults.headers.common.Authorization = `Bearer ${token}`;
+}
+
 API.interceptors.response.use(
 	(response) => response,
 	async (error) => {

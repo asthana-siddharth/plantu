@@ -7,18 +7,20 @@ import {
   FlatList,
   ActivityIndicator,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { getOrders } from "../../services/orderService";
 
-export default function OrdersScreen() {
+export default function OrdersScreen({ navigation }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const loadOrders = async () => {
+  const loadOrders = async () => {
       try {
+        setLoading(true);
         const response = await getOrders();
         setOrders(response);
+        setError("");
       } catch (err) {
         setError("Failed to load orders");
       } finally {
@@ -26,15 +28,28 @@ export default function OrdersScreen() {
       }
     };
 
+  useEffect(() => {
     loadOrders();
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadOrders();
+    }, [])
+  );
 
   const getStatusColor = (status) => {
     switch (status) {
       case "Delivered":
         return "#4CAF50";
+      case "Out for Delivery":
+        return "#00897B";
       case "Shipped":
         return "#2196F3";
+      case "Packed":
+        return "#5E35B1";
+      case "Confirmed":
+      case "Placed":
       case "Processing":
         return "#FF9800";
       case "Cancelled":
@@ -60,7 +75,10 @@ export default function OrdersScreen() {
   };
 
   const OrderCard = ({ order }) => (
-    <TouchableOpacity style={styles.orderCard}>
+    <TouchableOpacity
+      style={styles.orderCard}
+      onPress={() => navigation.navigate("OrderDetails", { orderId: order.id })}
+    >
       <View style={styles.orderHeader}>
         <View>
           <Text style={styles.orderId}>Order {order.id}</Text>
@@ -98,7 +116,10 @@ export default function OrdersScreen() {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.viewButton}>
+      <TouchableOpacity
+        style={styles.viewButton}
+        onPress={() => navigation.navigate("OrderDetails", { orderId: order.id })}
+      >
         <Text style={styles.viewButtonText}>View Details →</Text>
       </TouchableOpacity>
     </TouchableOpacity>

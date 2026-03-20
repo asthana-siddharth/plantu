@@ -1,4 +1,4 @@
-import React, { useState, useContext } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -7,14 +7,11 @@ import {
   TouchableOpacity,
   Alert,
 } from "react-native";
-import { AuthContext } from "../../context/AuthContext";
 import { sendOtp } from "../../services/authService";
 
 export default function LoginScreen({ navigation }) {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
-  const { dispatch } = useContext(AuthContext);
-
   const handleSendOTP = async () => {
     if (!phone || phone.length < 10) {
       Alert.alert("Error", "Please enter a valid phone number");

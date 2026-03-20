@@ -8,27 +8,58 @@ const initialState = {
   totalItems: 0,
 };
 
+const getItemKey = (payload = {}) => {
+  if (payload.itemId) {
+    return String(payload.itemId);
+  }
+
+  const type = payload.productType || "product";
+  return `${type}-${payload.product?.id}`;
+};
+
+const getMaxQuantity = (payload = {}) => {
+  if (payload.productType === "service") {
+    return Number(payload.maxQuantity || 1);
+  }
+
+  const stockQty = Number(payload.maxQuantity ?? payload.product?.stockQty ?? 0);
+  return Math.max(0, stockQty);
+};
+
 const cartReducer = (state, action) => {
   switch (action.type) {
     case "ADD_TO_CART": {
-      const { product, quantity } = action.payload;
-      const existingItem = state.items.find((item) => item.id === product.id);
+      const { product, quantity, productType = "product" } = action.payload;
+      const itemId = getItemKey(action.payload);
+      const maxQuantity = getMaxQuantity(action.payload);
+      if (maxQuantity <= 0) {
+        return state;
+      }
+
+      const existingItem = state.items.find((item) => item.id === itemId);
 
       let updatedItems;
       if (existingItem) {
         updatedItems = state.items.map((item) =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + quantity }
+          item.id === itemId
+            ? {
+                ...item,
+                quantity: Math.min(maxQuantity, item.quantity + quantity),
+                price: product.price * Math.min(maxQuantity, item.quantity + quantity),
+              }
             : item
         );
       } else {
+        const safeQuantity = Math.min(Math.max(1, Number(quantity || 1)), maxQuantity);
         updatedItems = [
           ...state.items,
           {
-            id: product.id,
+            id: itemId,
             product,
-            quantity,
-            price: product.price * quantity,
+            quantity: safeQuantity,
+            price: product.price * safeQuantity,
+            productType,
+            maxQuantity,
           },
         ];
       }
@@ -63,7 +94,13 @@ const cartReducer = (state, action) => {
       const { itemId, quantity } = action.payload;
       const updatedItems = state.items.map((item) =>
         item.id === itemId
-          ? { ...item, quantity, price: item.product.price * quantity }
+          ? {
+              ...item,
+              quantity: Math.min(Math.max(1, quantity), Math.max(1, item.maxQuantity || quantity)),
+              price:
+                item.product.price *
+                Math.min(Math.max(1, quantity), Math.max(1, item.maxQuantity || quantity)),
+            }
           : item
       );
       const newTotalPrice = updatedItems.reduce(
