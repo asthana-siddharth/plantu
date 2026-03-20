@@ -4,8 +4,20 @@ const { products, devices, orders } = require("./data");
 let primaryPool;
 
 function parseList(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value == null) {
+    return [];
+  }
+
   try {
-    return JSON.parse(value || "[]");
+    if (typeof value === "string") {
+      return JSON.parse(value || "[]");
+    }
+
+    return JSON.parse(String(value));
   } catch (_error) {
     return [];
   }
@@ -253,14 +265,14 @@ async function getOrderByIdFromPrimary(id) {
 }
 
 async function getNextOrderNumber() {
-  const rows = await queryPrimary("SELECT id FROM orders WHERE id LIKE 'ORD%' ORDER BY created_at DESC LIMIT 1");
-  if (!rows.length) {
-    return 1;
-  }
+  const rows = await queryPrimary(
+    `SELECT MAX(CAST(SUBSTRING(id, 4) AS UNSIGNED)) AS max_num
+     FROM orders
+     WHERE id REGEXP '^ORD[0-9]+$'`
+  );
 
-  const latestId = rows[0].id || "ORD000";
-  const numericPart = Number(String(latestId).replace("ORD", "")) || 0;
-  return numericPart + 1;
+  const maxNum = Number(rows?.[0]?.max_num || 0);
+  return maxNum + 1;
 }
 
 async function createOrderInPrimary(order, connection) {
