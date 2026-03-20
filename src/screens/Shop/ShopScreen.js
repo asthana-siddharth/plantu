@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,15 @@ import {
   FlatList,
   TextInput,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { getProducts } from "../../services/productService";
+import { CartContext } from "../../context/CartContext";
 
 export default function ShopScreen() {
   const navigation = useNavigation();
+  const { dispatch } = useContext(CartContext);
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +104,16 @@ export default function ShopScreen() {
           <TouchableOpacity
             style={styles.addButton}
             disabled={!item.inStock}
+            onPress={(event) => {
+              event?.stopPropagation?.();
+
+              dispatch({
+                type: "ADD_TO_CART",
+                payload: { product: item, quantity: 1 },
+              });
+
+              Alert.alert("Added", `${item.name} added to cart`);
+            }}
           >
             <Text style={styles.addButtonText}>+</Text>
           </TouchableOpacity>

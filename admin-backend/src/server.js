@@ -1,0 +1,226 @@
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const {
+  initDb,
+  checkDbHealth,
+  listProducts,
+  createProduct,
+  updateProduct,
+  listInventory,
+  updateInventory,
+  listCustomers,
+  listOrders,
+  updateOrderStatus,
+  listVendors,
+  createVendor,
+  updateVendor,
+  listPromotions,
+  createPromotion,
+  updatePromotion,
+} = require("./db");
+
+const app = express();
+const PORT = Number(process.env.PORT || 5001);
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "admin123";
+
+app.use(cors());
+app.use(express.json());
+
+function ok(res, data) {
+  return res.json({ success: true, data });
+}
+
+function fail(res, status, message) {
+  return res.status(status).json({ success: false, message });
+}
+
+function requireAdminToken(req, res, next) {
+  const token = req.headers["x-admin-token"];
+  if (!token || token !== ADMIN_TOKEN) {
+    return fail(res, 401, "Unauthorized admin request");
+  }
+  return next();
+}
+
+app.get("/health", (_req, res) => ok(res, { service: "plantu-admin-backend", status: "up" }));
+
+app.get("/health/dependencies", async (_req, res) => {
+  const db = await checkDbHealth();
+  const healthy = db.ok;
+  return res.status(healthy ? 200 : 503).json({ success: healthy, data: { mysql: db } });
+});
+
+app.use(requireAdminToken);
+
+app.get("/admin/products", async (_req, res) => {
+  try {
+    return ok(res, await listProducts());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch products: ${error.message}`);
+  }
+});
+
+app.post("/admin/products", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.id || !payload.name || !payload.category) {
+      return fail(res, 400, "id, name and category are required");
+    }
+    if (payload.price == null || payload.rating == null) {
+      return fail(res, 400, "price and rating are required");
+    }
+
+    await createProduct({
+      ...payload,
+      stockQty: Number(payload.stockQty || 0),
+      inStock: Boolean(payload.inStock),
+    });
+    return ok(res, { created: true, id: payload.id });
+  } catch (error) {
+    return fail(res, 500, `Failed to create product: ${error.message}`);
+  }
+});
+
+app.put("/admin/products/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await updateProduct(id, {
+      ...req.body,
+      stockQty: Number(req.body?.stockQty || 0),
+      inStock: Boolean(req.body?.inStock),
+    });
+    if (!rows.length) return fail(res, 404, "Product not found");
+    return ok(res, rows[0]);
+  } catch (error) {
+    return fail(res, 500, `Failed to update product: ${error.message}`);
+  }
+});
+
+app.get("/admin/inventory", async (_req, res) => {
+  try {
+    return ok(res, await listInventory());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch inventory: ${error.message}`);
+  }
+});
+
+app.patch("/admin/inventory/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const stockQty = Number(req.body?.stockQty);
+    if (Number.isNaN(stockQty) || stockQty < 0) {
+      return fail(res, 400, "stockQty must be a valid non-negative number");
+    }
+
+    const rows = await updateInventory(id, stockQty);
+    if (!rows.length) return fail(res, 404, "Product not found");
+    return ok(res, rows[0]);
+  } catch (error) {
+    return fail(res, 500, `Failed to update inventory: ${error.message}`);
+  }
+});
+
+app.get("/admin/customers", async (_req, res) => {
+  try {
+    return ok(res, await listCustomers());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch customers: ${error.message}`);
+  }
+});
+
+app.get("/admin/orders", async (_req, res) => {
+  try {
+    return ok(res, await listOrders());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch orders: ${error.message}`);
+  }
+});
+
+app.patch("/admin/orders/:id/status", async (req, res) => {
+  try {
+    const status = String(req.body?.status || "").trim();
+    if (!status) return fail(res, 400, "status is required");
+
+    const updated = await updateOrderStatus(req.params.id, status);
+    if (!updated) return fail(res, 404, "Order not found");
+    return ok(res, updated);
+  } catch (error) {
+    return fail(res, 500, `Failed to update order status: ${error.message}`);
+  }
+});
+
+app.get("/admin/vendors", async (_req, res) => {
+  try {
+    return ok(res, await listVendors());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch vendors: ${error.message}`);
+  }
+});
+
+app.post("/admin/vendors", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.name) return fail(res, 400, "name is required");
+    const rows = await createVendor(payload);
+    return ok(res, rows[0]);
+  } catch (error) {
+    return fail(res, 500, `Failed to create vendor: ${error.message}`);
+  }
+});
+
+app.put("/admin/vendors/:id", async (req, res) => {
+  try {
+    const rows = await updateVendor(Number(req.params.id), req.body || {});
+    if (!rows.length) return fail(res, 404, "Vendor not found");
+    return ok(res, rows[0]);
+  } catch (error) {
+    return fail(res, 500, `Failed to update vendor: ${error.message}`);
+  }
+});
+
+app.get("/admin/promotions", async (_req, res) => {
+  try {
+    return ok(res, await listPromotions());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch promotions: ${error.message}`);
+  }
+});
+
+app.post("/admin/promotions", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.code || !payload.title || payload.discountValue == null) {
+      return fail(res, 400, "code, title and discountValue are required");
+    }
+    const rows = await createPromotion(payload);
+    return ok(res, rows[0]);
+  } catch (error) {
+    return fail(res, 500, `Failed to create promotion: ${error.message}`);
+  }
+});
+
+app.put("/admin/promotions/:id", async (req, res) => {
+  try {
+    const rows = await updatePromotion(Number(req.params.id), req.body || {});
+    if (!rows.length) return fail(res, 404, "Promotion not found");
+    return ok(res, rows[0]);
+  } catch (error) {
+    return fail(res, 500, `Failed to update promotion: ${error.message}`);
+  }
+});
+
+app.use((req, res) => fail(res, 404, `No route found for ${req.method} ${req.originalUrl}`));
+
+async function start() {
+  await initDb();
+  app.listen(PORT, () => {
+    console.log(`Plantu admin backend running on http://localhost:${PORT}`);
+  });
+}
+
+start().catch((error) => {
+  console.error("Failed to start admin backend:", error.message);
+  process.exit(1);
+});
