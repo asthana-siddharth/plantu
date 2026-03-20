@@ -11,7 +11,7 @@ import {
 import { CartContext } from "../../context/CartContext";
 import { getServices } from "../../services/serviceCatalogService";
 
-export default function GardenerBookingScreen() {
+export default function GardenerBookingScreen({ navigation }) {
   const { dispatch } = useContext(CartContext);
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,9 +70,17 @@ export default function GardenerBookingScreen() {
           <Text style={styles.description}>{service.description}</Text>
           <View style={styles.bottomRow}>
             <Text style={styles.price}>₹{service.price}</Text>
-            <TouchableOpacity style={styles.bookButton} onPress={() => handleAddService(service)}>
-              <Text style={styles.bookButtonText}>Add to Cart</Text>
-            </TouchableOpacity>
+            <View style={styles.actionsRow}>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => navigation.navigate("ServiceDetail", { serviceId: service.id, service })}
+              >
+                <Text style={styles.secondaryButtonText}>Details</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.bookButton} onPress={() => handleAddService(service)}>
+                <Text style={styles.bookButtonText}>Add to Cart</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       ))}
@@ -117,6 +125,25 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  secondaryButton: {
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  secondaryButtonText: {
+    color: "#2f7d32",
+    fontSize: 13,
+    fontWeight: "600",
   },
   price: { fontSize: 18, fontWeight: "700", color: "#1f6f45" },
   bookButton: {

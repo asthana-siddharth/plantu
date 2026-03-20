@@ -9,6 +9,19 @@ import {
 } from "react-native";
 import { getOrderById } from "../../services/orderService";
 
+function normalizeLineItem(rawItem = {}, index = 0) {
+  const type = String(rawItem.type || "product").toLowerCase();
+  const normalizedId = rawItem.id != null ? rawItem.id : `line-${index}`;
+
+  return {
+    id: normalizedId,
+    type: type === "service" ? "service" : "product",
+    name: rawItem.name || "Item",
+    quantity: Number(rawItem.quantity || 1),
+    lineTotal: Number(rawItem.lineTotal || 0),
+  };
+}
+
 export default function OrderDetailsScreen({ route, navigation }) {
   const { orderId, order: prefetchedOrder } = route.params || {};
   const [order, setOrder] = useState(prefetchedOrder || null);
@@ -54,16 +67,38 @@ export default function OrderDetailsScreen({ route, navigation }) {
 
   const lineItems = useMemo(() => {
     if (Array.isArray(order?.order_items) && order.order_items.length) {
-      return order.order_items;
+      return order.order_items.map((item, index) => normalizeLineItem(item, index));
     }
 
-    return (order?.items_list || []).map((name, index) => ({
-      id: `line-${index}`,
-      name,
-      quantity: 1,
-      lineTotal: 0,
-    }));
+    return (order?.items_list || []).map((name, index) =>
+      normalizeLineItem(
+        {
+          id: `line-${index}`,
+          type: "product",
+          name,
+          quantity: 1,
+          lineTotal: 0,
+        },
+        index
+      )
+    );
   }, [order]);
+
+  const productItems = useMemo(() => lineItems.filter((item) => item.type === "product"), [lineItems]);
+  const serviceItems = useMemo(() => lineItems.filter((item) => item.type === "service"), [lineItems]);
+
+  const openLineItemDetails = (item) => {
+    if (item.type === "service") {
+      navigation.navigate("ServiceDetail", {
+        serviceId: Number(item.id),
+      });
+      return;
+    }
+
+    navigation.navigate("ProductDetail", {
+      productId: Number(item.id),
+    });
+  };
 
   if (loading) {
     return (
@@ -95,15 +130,40 @@ export default function OrderDetailsScreen({ route, navigation }) {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Items</Text>
-        {lineItems.map((item, index) => (
-          <View key={item.id || index} style={styles.itemRow}>
+        <Text style={styles.sectionTitle}>Products</Text>
+        {productItems.length === 0 && <Text style={styles.emptyHint}>No products in this order.</Text>}
+        {productItems.map((item, index) => (
+          <TouchableOpacity
+            key={`product-${item.id || index}`}
+            style={styles.itemRow}
+            onPress={() => openLineItemDetails(item)}
+            activeOpacity={0.85}
+          >
             <View style={{ flex: 1 }}>
               <Text style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemMeta}>Qty: {item.quantity || 1}</Text>
+              <Text style={styles.itemMeta}>Qty: {item.quantity || 1} • Tap for details</Text>
             </View>
             <Text style={styles.itemPrice}>₹{Math.round(Number(item.lineTotal || 0))}</Text>
-          </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Services</Text>
+        {serviceItems.length === 0 && <Text style={styles.emptyHint}>No services in this order.</Text>}
+        {serviceItems.map((item, index) => (
+          <TouchableOpacity
+            key={`service-${item.id || index}`}
+            style={styles.itemRow}
+            onPress={() => openLineItemDetails(item)}
+            activeOpacity={0.85}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemName}>{item.name}</Text>
+              <Text style={styles.itemMeta}>Qty: {item.quantity || 1} • Tap for details</Text>
+            </View>
+            <Text style={styles.itemPrice}>₹{Math.round(Number(item.lineTotal || 0))}</Text>
+          </TouchableOpacity>
         ))}
       </View>
 
@@ -139,6 +199,7 @@ const styles = StyleSheet.create({
   itemName: { fontSize: 14, fontWeight: "600", color: "#334" },
   itemMeta: { fontSize: 12, color: "#7a8" },
   itemPrice: { fontSize: 14, fontWeight: "700", color: "#1f6f45" },
+  emptyHint: { fontSize: 13, color: "#758", paddingVertical: 4 },
   totalLabel: { fontSize: 14, color: "#556" },
   totalValue: { fontSize: 26, fontWeight: "800", color: "#1f6f45", marginTop: 3 },
   primaryButton: {

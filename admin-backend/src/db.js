@@ -124,6 +124,33 @@ async function initSchema() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS services (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      code VARCHAR(64) UNIQUE NOT NULL,
+      title VARCHAR(180) NOT NULL,
+      description TEXT,
+      category_slug VARCHAR(120) NOT NULL DEFAULT 'gardener-visit',
+      duration_minutes INT NOT NULL DEFAULT 60,
+      image VARCHAR(24) NULL,
+      price DECIMAL(10, 2) NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  if (!(await columnExists("services", "category_slug"))) {
+    await query("ALTER TABLE services ADD COLUMN category_slug VARCHAR(120) NOT NULL DEFAULT 'gardener-visit'");
+  }
+
+  if (!(await columnExists("services", "duration_minutes"))) {
+    await query("ALTER TABLE services ADD COLUMN duration_minutes INT NOT NULL DEFAULT 60");
+  }
+
+  if (!(await columnExists("services", "image"))) {
+    await query("ALTER TABLE services ADD COLUMN image VARCHAR(24) NULL");
+  }
 }
 
 function toSlug(value) {
@@ -197,6 +224,19 @@ async function seedAdminData() {
         "Irrigation", "irrigation", CATEGORY_HEADS.ITEM, 1,
         "Gardener Visit", "gardener-visit", CATEGORY_HEADS.SERVICE, 1,
         "Plant Doctor", "plant-doctor", CATEGORY_HEADS.SERVICE, 1,
+      ]
+    );
+  }
+
+  const serviceCount = await query("SELECT COUNT(1) AS count FROM services");
+  if (Number(serviceCount[0].count) === 0) {
+    await query(
+      `INSERT INTO services (code, title, description, category_slug, duration_minutes, image, price, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        "svc_balcony", "Balcony Garden Care", "Monthly maintenance for balcony plants", "gardener-visit", 45, "🪴", 499, 1,
+        "svc_villa", "Villa / Lawn Maintenance", "Comprehensive care for villa gardens and lawns", "gardener-visit", 90, "🏡", 899, 1,
+        "svc_plant_doctor", "Plant Doctor Visit", "One-time expert diagnosis and treatment", "plant-doctor", 60, "🩺", 699, 1,
       ]
     );
   }
@@ -382,6 +422,85 @@ async function updateProductCategory(id, payload) {
   return rows[0] || null;
 }
 
+async function listServices() {
+  return query(
+    `SELECT id, code, title, description, category_slug, duration_minutes, image, price, is_active, created_at
+     FROM services
+     ORDER BY id ASC`
+  );
+}
+
+async function createService(payload) {
+  const category = await getProductCategoryBySlug(payload.category);
+  if (!category || !category.is_active || category.head !== CATEGORY_HEADS.SERVICE) {
+    const error = new Error("Invalid service category");
+    error.code = "INVALID_CATEGORY";
+    throw error;
+  }
+
+  const result = await query(
+    `INSERT INTO services (code, title, description, category_slug, duration_minutes, image, price, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      payload.code,
+      payload.title,
+      payload.description || null,
+      payload.category,
+      Number(payload.durationMinutes || 60),
+      payload.image || null,
+      Number(payload.price || 0),
+      payload.isActive ? 1 : 0,
+    ]
+  );
+
+  const rows = await query(
+    `SELECT id, code, title, description, category_slug, duration_minutes, image, price, is_active, created_at
+     FROM services WHERE id = ?`,
+    [result.insertId]
+  );
+  return rows[0] || null;
+}
+
+async function updateService(id, payload) {
+  const existingRows = await query("SELECT * FROM services WHERE id = ?", [id]);
+  if (!existingRows.length) {
+    return null;
+  }
+
+  const current = existingRows[0];
+  const nextCategory = payload.category || current.category_slug;
+  const category = await getProductCategoryBySlug(nextCategory);
+  if (!category || !category.is_active || category.head !== CATEGORY_HEADS.SERVICE) {
+    const error = new Error("Invalid service category");
+    error.code = "INVALID_CATEGORY";
+    throw error;
+  }
+
+  await query(
+    `UPDATE services
+     SET code = ?, title = ?, description = ?, category_slug = ?, duration_minutes = ?, image = ?, price = ?, is_active = ?
+     WHERE id = ?`,
+    [
+      String(payload.code || current.code).trim(),
+      String(payload.title || current.title).trim(),
+      payload.description ?? current.description,
+      nextCategory,
+      Number(payload.durationMinutes ?? current.duration_minutes ?? 60),
+      payload.image ?? current.image,
+      Number(payload.price ?? current.price ?? 0),
+      payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0),
+      id,
+    ]
+  );
+
+  const rows = await query(
+    `SELECT id, code, title, description, category_slug, duration_minutes, image, price, is_active, created_at
+     FROM services WHERE id = ?`,
+    [id]
+  );
+  return rows[0] || null;
+}
+
 async function updateInventory(id, stockQty) {
   await query(
     "UPDATE products SET stock_qty = ?, in_stock = ? WHERE id = ?",
@@ -520,4 +639,7 @@ module.exports = {
   listProductCategories,
   createProductCategory,
   updateProductCategory,
+  listServices,
+  createService,
+  updateService,
 };

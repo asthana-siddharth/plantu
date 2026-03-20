@@ -22,6 +22,7 @@ const {
   getUserById,
   updateUserProfile,
   listServices,
+  getServiceById,
 } = require("./db");
 
 const app = express();
@@ -64,17 +65,27 @@ function parseUserIdFromToken(token) {
   return phone ? `user-${phone}` : "";
 }
 
+function parsePhoneFromToken(token) {
+  if (!token.startsWith("dev-token-")) {
+    return "";
+  }
+
+  return token.slice("dev-token-".length).trim();
+}
+
 async function requireAuth(req, res, next) {
   const token = parseToken(req);
   const userId = parseUserIdFromToken(token);
+  const phoneFromToken = parsePhoneFromToken(token);
 
-  if (!token || !userId) {
+  if (!token || !userId || !phoneFromToken) {
     return fail(res, 401, "Unauthorized");
   }
 
-  const user = await getUserById(userId);
+  let user = await getUserById(userId);
   if (!user) {
-    return fail(res, 401, "Invalid user");
+    // Recover gracefully if DB was reset but client still has a valid token.
+    user = await findOrCreateUserByPhone(phoneFromToken);
   }
 
   req.auth = {
@@ -192,6 +203,24 @@ app.get("/services", async (_req, res) => {
     return ok(res, await listServices());
   } catch (error) {
     return fail(res, 500, `Failed to fetch services: ${error.message}`);
+  }
+});
+
+app.get("/services/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid service id");
+    }
+
+    const service = await getServiceById(id);
+    if (!service) {
+      return fail(res, 404, "Service not found");
+    }
+
+    return ok(res, service);
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch service: ${error.message}`);
   }
 });
 

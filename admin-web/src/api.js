@@ -43,3 +43,8 @@ export async function createProduct(payload) {
   const response = await API.post("/admin/products", payload);
   return response?.data?.data;
 }
+
+export async function createService(payload) {
+  const response = await API.post("/admin/services", payload);
+  return response?.data?.data;
+}

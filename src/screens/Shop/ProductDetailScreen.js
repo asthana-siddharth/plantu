@@ -1,6 +1,7 @@
 // filepath: src/screens/Shop/ProductDetailScreen.js
-import React, { useState, useContext } from "react";
+import React, { useEffect, useState, useContext } from "react";
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -9,15 +10,70 @@ import {
   Alert,
 } from "react-native";
 import { CartContext } from "../../context/CartContext";
+import { getProductById } from "../../services/productService";
 
 export default function ProductDetailScreen({ route, navigation }) {
-  const { product } = route.params;
+  const { product: incomingProduct, productId } = route.params || {};
+  const [product, setProduct] = useState(incomingProduct || null);
+  const [loading, setLoading] = useState(!incomingProduct && Boolean(productId));
   const [quantity, setQuantity] = useState(1);
   const [addingToCart, setAddingToCart] = useState(false);
   const { dispatch } = useContext(CartContext);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadProduct() {
+      if (!productId || incomingProduct) {
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const response = await getProductById(productId);
+        if (isMounted) {
+          setProduct(response || null);
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setProduct(null);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadProduct();
+    return () => {
+      isMounted = false;
+    };
+  }, [incomingProduct, productId]);
+
+  if (loading) {
+    return (
+      <View style={styles.centeredState}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  if (!product) {
+    return (
+      <View style={styles.centeredState}>
+        <Text style={styles.errorText}>Product details unavailable.</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backToPrevButton}>
+          <Text style={styles.backToPrevText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const maxAllowed = Math.max(0, Number(product.stockQty ?? product.stock_qty ?? 0) || 0);
+  const productInStock = Boolean(product.inStock) && maxAllowed > 0;
+
   const handleAddToCart = () => {
-    const maxAllowed = Number(product.stockQty || 0);
     if (quantity > maxAllowed) {
       Alert.alert("Stock limit", `Only ${maxAllowed} units are available`);
       return;
@@ -127,7 +183,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             </TouchableOpacity>
             <Text style={styles.quantityValue}>{quantity}</Text>
             <TouchableOpacity
-              onPress={() => setQuantity(Math.min(Number(product.stockQty || 1), quantity + 1))}
+              onPress={() => setQuantity(Math.min(Math.max(1, maxAllowed), quantity + 1))}
               style={styles.quantityButton}
             >
               <Text style={styles.quantityButtonText}>+</Text>
@@ -139,10 +195,10 @@ export default function ProductDetailScreen({ route, navigation }) {
         <TouchableOpacity
           style={[
             styles.addToCartButton,
-            !product.inStock && styles.addToCartButtonDisabled,
+            !productInStock && styles.addToCartButtonDisabled,
           ]}
           onPress={handleAddToCart}
-          disabled={!product.inStock || addingToCart}
+          disabled={!productInStock || addingToCart}
         >
           <Text style={styles.addToCartText}>
             {addingToCart ? "Adding..." : "Add to Cart"}
@@ -315,5 +371,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#2E7D32",
     marginBottom: 6,
+  },
+  centeredState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    fontSize: 14,
+    color: "#c62828",
+    marginBottom: 10,
+  },
+  backToPrevButton: {
+    backgroundColor: "#4CAF50",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  backToPrevText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
   },
 });

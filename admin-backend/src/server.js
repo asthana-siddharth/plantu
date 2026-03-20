@@ -22,6 +22,9 @@ const {
   listProductCategories,
   createProductCategory,
   updateProductCategory,
+  listServices,
+  createService,
+  updateService,
 } = require("./db");
 
 const app = express();
@@ -156,6 +159,52 @@ app.get("/admin/inventory", async (_req, res) => {
     return ok(res, await listInventory());
   } catch (error) {
     return fail(res, 500, `Failed to fetch inventory: ${error.message}`);
+  }
+});
+
+app.get("/admin/services", async (_req, res) => {
+  try {
+    return ok(res, await listServices());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch services: ${error.message}`);
+  }
+});
+
+app.post("/admin/services", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.code || !payload.title || payload.price == null || !payload.category) {
+      return fail(res, 400, "code, title, category and price are required");
+    }
+
+    const created = await createService(payload);
+    return ok(res, created);
+  } catch (error) {
+    if (error.code === "INVALID_CATEGORY") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to create service: ${error.message}`);
+  }
+});
+
+app.put("/admin/services/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid service id");
+    }
+
+    const updated = await updateService(id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "Service not found");
+    }
+
+    return ok(res, updated);
+  } catch (error) {
+    if (error.code === "INVALID_CATEGORY") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to update service: ${error.message}`);
   }
 });
 

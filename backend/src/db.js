@@ -2,6 +2,7 @@ const mysql = require("mysql2/promise");
 const { products, devices, orders } = require("./data");
 
 let primaryPool;
+const TEMP_INVENTORY_BASELINE = 10;
 
 function parseList(value) {
   if (Array.isArray(value)) {
@@ -91,6 +92,9 @@ function mapService(row) {
     code: row.code,
     title: row.title,
     description: row.description,
+    category: row.category_slug || "gardener-visit",
+    durationMinutes: Number(row.duration_minutes || 60),
+    image: row.image || "🧑‍🌾",
     price: Number(row.price),
     isActive: Boolean(row.is_active),
   };
@@ -143,12 +147,12 @@ async function initializeSchema() {
       image VARCHAR(80),
       description TEXT,
       in_stock TINYINT(1) NOT NULL DEFAULT 1,
-      stock_qty INT NOT NULL DEFAULT 25
+      stock_qty INT NOT NULL DEFAULT 10
     )
   `);
 
   if (!(await columnExists("products", "stock_qty"))) {
-    await queryPrimary("ALTER TABLE products ADD COLUMN stock_qty INT NOT NULL DEFAULT 25");
+    await queryPrimary("ALTER TABLE products ADD COLUMN stock_qty INT NOT NULL DEFAULT 10");
   }
 
   await queryPrimary(`
@@ -215,11 +219,26 @@ async function initializeSchema() {
       code VARCHAR(64) UNIQUE NOT NULL,
       title VARCHAR(180) NOT NULL,
       description TEXT,
+      category_slug VARCHAR(120) NOT NULL DEFAULT 'gardener-visit',
+      duration_minutes INT NOT NULL DEFAULT 60,
+      image VARCHAR(24) NULL,
       price DECIMAL(10, 2) NOT NULL,
       is_active TINYINT(1) NOT NULL DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  if (!(await columnExists("services", "category_slug"))) {
+    await queryPrimary("ALTER TABLE services ADD COLUMN category_slug VARCHAR(120) NOT NULL DEFAULT 'gardener-visit'");
+  }
+
+  if (!(await columnExists("services", "duration_minutes"))) {
+    await queryPrimary("ALTER TABLE services ADD COLUMN duration_minutes INT NOT NULL DEFAULT 60");
+  }
+
+  if (!(await columnExists("services", "image"))) {
+    await queryPrimary("ALTER TABLE services ADD COLUMN image VARCHAR(24) NULL");
+  }
 }
 
 async function seedIfEmpty() {
@@ -238,7 +257,7 @@ async function seedIfEmpty() {
           item.image,
           item.description,
           item.inStock ? 1 : 0,
-          item.stockQty || 25,
+          item.stockQty || TEMP_INVENTORY_BASELINE,
         ]
       );
     }
@@ -278,12 +297,12 @@ async function seedIfEmpty() {
   const serviceCountRows = await queryPrimary("SELECT COUNT(1) AS count FROM services");
   if (serviceCountRows[0].count === 0) {
     await queryPrimary(
-      `INSERT INTO services (code, title, description, price, is_active)
-       VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)`,
+      `INSERT INTO services (code, title, description, category_slug, duration_minutes, image, price, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        "svc_balcony", "Balcony Garden Care", "Monthly maintenance for balcony plants", 499, 1,
-        "svc_villa", "Villa / Lawn Maintenance", "Comprehensive care for villa gardens and lawns", 899, 1,
-        "svc_plant_doctor", "Plant Doctor Visit", "One-time expert diagnosis and treatment", 699, 1,
+        "svc_balcony", "Balcony Garden Care", "Monthly maintenance for balcony plants", "gardener-visit", 45, "🪴", 499, 1,
+        "svc_villa", "Villa / Lawn Maintenance", "Comprehensive care for villa gardens and lawns", "gardener-visit", 90, "🏡", 899, 1,
+        "svc_plant_doctor", "Plant Doctor Visit", "One-time expert diagnosis and treatment", "plant-doctor", 60, "🩺", 699, 1,
       ]
     );
   }
@@ -521,6 +540,11 @@ async function listServices() {
   return rows.map(mapService);
 }
 
+async function getServiceById(id) {
+  const rows = await querySecondary("SELECT * FROM services WHERE id = ? AND is_active = 1", [id]);
+  return rows.length ? mapService(rows[0]) : null;
+}
+
 async function withPrimaryTransaction(executor) {
   const connection = await primaryPool.getConnection();
   try {
@@ -569,4 +593,5 @@ module.exports = {
   getUserById,
   updateUserProfile,
   listServices,
+  getServiceById,
 };

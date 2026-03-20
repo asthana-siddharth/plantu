@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  createService,
   createProduct,
   createProductCategory,
   fetchModule,
@@ -10,6 +11,7 @@ import {
 
 const modules = [
   { key: "products", label: "Products", path: "/admin/products" },
+  { key: "services", label: "Services", path: "/admin/services" },
   { key: "categoryMaster", label: "Product Category Master", path: "/admin/product-categories" },
   { key: "inventory", label: "Inventory", path: "/admin/inventory" },
   { key: "customers", label: "Customers", path: "/admin/customers" },
@@ -93,6 +95,21 @@ export default function App() {
     () => categories.filter((cat) => cat.head === "item" && Number(cat.is_active) === 1),
     [categories]
   );
+  const serviceCategories = useMemo(
+    () => categories.filter((cat) => cat.head === "service" && Number(cat.is_active) === 1),
+    [categories]
+  );
+
+  const [serviceDraft, setServiceDraft] = useState({
+    code: "",
+    title: "",
+    category: "",
+    description: "",
+    durationMinutes: "60",
+    image: "🧑‍🌾",
+    price: "",
+    isActive: true,
+  });
   const inventoryFilteredRows = useMemo(() => {
     if (active.key !== "inventory") return rows;
     if (inventoryCategoryFilter === "all") return rows;
@@ -207,6 +224,39 @@ export default function App() {
       await loadModule(active);
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Create product failed");
+    }
+  }
+
+  async function handleCreateService(event) {
+    event.preventDefault();
+
+    const durationMinutes = Number(serviceDraft.durationMinutes);
+    const price = Number(serviceDraft.price);
+
+    if (!serviceDraft.code.trim() || !serviceDraft.title.trim() || !serviceDraft.category.trim()) return;
+    if (Number.isNaN(durationMinutes) || Number.isNaN(price)) return;
+
+    try {
+      await createService({
+        code: serviceDraft.code.trim(),
+        title: serviceDraft.title.trim(),
+        category: serviceDraft.category.trim(),
+        description: serviceDraft.description.trim(),
+        durationMinutes,
+        image: serviceDraft.image.trim(),
+        price,
+        isActive: serviceDraft.isActive,
+      });
+      setServiceDraft((prev) => ({
+        ...prev,
+        code: "",
+        title: "",
+        description: "",
+        price: "",
+      }));
+      await loadModule(active);
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Create service failed");
     }
   }
 
@@ -340,6 +390,53 @@ export default function App() {
               onChange={(e) => setProductDraft((prev) => ({ ...prev, description: e.target.value }))}
             />
             <button type="submit">Add Product</button>
+          </form>
+        )}
+
+        {active.key === "services" && (
+          <form className="inlineForm" onSubmit={handleCreateService}>
+            <input
+              placeholder="Service Code"
+              value={serviceDraft.code}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, code: e.target.value }))}
+            />
+            <input
+              placeholder="Service Title"
+              value={serviceDraft.title}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, title: e.target.value }))}
+            />
+            <select
+              value={serviceDraft.category}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, category: e.target.value }))}
+            >
+              <option value="">Select Service Category</option>
+              {serviceCategories.map((cat) => (
+                <option key={cat.id} value={cat.slug}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Duration (minutes)"
+              value={serviceDraft.durationMinutes}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, durationMinutes: e.target.value }))}
+            />
+            <input
+              placeholder="Service Icon (emoji)"
+              value={serviceDraft.image}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, image: e.target.value }))}
+            />
+            <input
+              placeholder="Price"
+              value={serviceDraft.price}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, price: e.target.value }))}
+            />
+            <input
+              placeholder="Description"
+              value={serviceDraft.description}
+              onChange={(e) => setServiceDraft((prev) => ({ ...prev, description: e.target.value }))}
+            />
+            <button type="submit">Add Service</button>
           </form>
         )}
 
