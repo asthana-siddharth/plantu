@@ -2,7 +2,6 @@ const mysql = require("mysql2/promise");
 const { products, devices, orders } = require("./data");
 
 let primaryPool;
-let secondaryPool;
 
 function parseList(value) {
   try {
@@ -82,7 +81,7 @@ async function queryPrimary(sql, params = []) {
 }
 
 async function querySecondary(sql, params = []) {
-  const [rows] = await secondaryPool.query(sql, params);
+  const [rows] = await primaryPool.query(sql, params);
   return rows;
 }
 
@@ -168,15 +167,13 @@ async function seedIfEmpty() {
 }
 
 async function initDb() {
-  if (primaryPool && secondaryPool) {
+  if (primaryPool) {
     return;
   }
 
   primaryPool = mysql.createPool(getPrimaryConfig());
-  secondaryPool = mysql.createPool(getSecondaryConfig());
 
   await primaryPool.query("SELECT 1");
-  await secondaryPool.query("SELECT 1");
 
   await initializeSchema();
   await seedIfEmpty();
@@ -301,12 +298,8 @@ async function checkPrimaryHealth() {
 }
 
 async function checkSecondaryHealth() {
-  try {
-    const [rows] = await secondaryPool.query("SELECT 1 AS ok");
-    return { ok: Boolean(rows?.[0]?.ok) };
-  } catch (error) {
-    return { ok: false, message: error.message };
-  }
+  // POC mode uses one MySQL instance for both read and write paths.
+  return checkPrimaryHealth();
 }
 
 module.exports = {

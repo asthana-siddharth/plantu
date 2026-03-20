@@ -17,14 +17,6 @@ const {
   checkPrimaryHealth,
   checkSecondaryHealth,
 } = require("./db");
-const {
-  ensureIndex,
-  indexOrder,
-  getOrderById,
-  listOrders,
-  getOrderCount,
-  checkElasticHealth,
-} = require("./orderSearch");
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
@@ -48,43 +40,29 @@ function getTodayLongDate() {
   });
 }
 
-async function backfillOrdersInSearchIfNeeded() {
-  const count = await getOrderCount();
-  if (count > 0) {
-    return;
-  }
-
-  const orders = await listOrdersFromPrimary();
-  for (const order of orders) {
-    await indexOrder(order);
-  }
-}
-
 app.get("/health", (_req, res) => {
   return ok(res, {
     service: "plantu-backend",
     status: "up",
-    dbMode: "mysql-primary-write-secondary-read",
-    orderReadModel: "elasticsearch",
+    dbMode: "mysql-single",
+    orderReadModel: "mysql",
   });
 });
 
 app.get("/health/dependencies", async (_req, res) => {
-  const [primary, secondary, elastic] = await Promise.all([
+  const [primary, secondary] = await Promise.all([
     checkPrimaryHealth(),
     checkSecondaryHealth(),
-    checkElasticHealth(),
   ]);
 
-  const allHealthy = primary.ok && secondary.ok && elastic.ok;
+  const allHealthy = primary.ok && secondary.ok;
   const statusCode = allHealthy ? 200 : 503;
 
   return res.status(statusCode).json({
     success: allHealthy,
     data: {
-      mysqlPrimary: primary,
-      mysqlSecondary: secondary,
-      elasticsearch: elastic,
+      mysql: primary,
+      mysqlReader: secondary,
     },
   });
 });
@@ -198,27 +176,23 @@ app.patch("/devices/:id", async (req, res) => {
 
 app.get("/orders", async (_req, res) => {
   try {
-    const items = await listOrders({ size: 200 });
+    const items = await listOrdersFromPrimary();
     return ok(res, items);
   } catch (error) {
-    return fail(res, 500, `Failed to fetch orders from Elasticsearch: ${error.message}`);
+    return fail(res, 500, `Failed to fetch orders from MySQL: ${error.message}`);
   }
 });
 
 app.get("/orders/:id", async (req, res) => {
   try {
-    const item = await getOrderById(req.params.id);
+    const item = await getOrderByIdFromPrimary(req.params.id);
     if (!item) {
       return fail(res, 404, "Order not found");
     }
 
     return ok(res, item);
   } catch (error) {
-    if (error?.meta?.statusCode === 404) {
-      return fail(res, 404, "Order not found");
-    }
-
-    return fail(res, 500, `Failed to fetch order from Elasticsearch: ${error.message}`);
+    return fail(res, 500, `Failed to fetch order from MySQL: ${error.message}`);
   }
 });
 
@@ -247,12 +221,11 @@ app.post("/orders", async (req, res) => {
 
     await withPrimaryTransaction(async (connection) => {
       await createOrderInPrimary(order, connection);
-      await indexOrder(order);
     });
 
     return ok(res, order);
   } catch (error) {
-    return fail(res, 500, `Failed to create order in MySQL/Elasticsearch: ${error.message}`);
+    return fail(res, 500, `Failed to create order in MySQL: ${error.message}`);
   }
 });
 
@@ -262,8 +235,6 @@ app.use((req, res) => {
 
 async function start() {
   await initDb();
-  await ensureIndex();
-  await backfillOrdersInSearchIfNeeded();
 
   app.listen(PORT, () => {
     console.log(`Plantu backend running on http://localhost:${PORT}`);
