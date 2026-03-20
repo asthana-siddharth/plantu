@@ -25,14 +25,28 @@ const CATEGORY_META = {
   irrigation: { name: "Irrigation", icon: "💧" },
 };
 
-function formatCategoryLabel(categoryId) {
-  const meta = CATEGORY_META[categoryId] || {};
-  const fallbackName = String(categoryId || "")
+function normalizeCategoryId(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+}
+
+function getCategoryIcon(categoryId) {
+  const normalized = normalizeCategoryId(categoryId);
+  return (CATEGORY_META[normalized] && CATEGORY_META[normalized].icon) || "📦";
+}
+
+function getCategoryName(categoryId) {
+  const normalized = normalizeCategoryId(categoryId);
+  const meta = CATEGORY_META[normalized] || {};
+  if (meta.name) {
+    return meta.name;
+  }
+
+  return String(normalized || "other")
     .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (ch) => ch.toUpperCase()) || "Other";
-  const name = meta.name || fallbackName;
-  const icon = meta.icon || "📦";
-  return `${icon} ${name}`;
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
 export default function ShopScreen() {
@@ -48,7 +62,7 @@ export default function ShopScreen() {
     const discovered = Array.from(
       new Set(
         products
-          .map((item) => String(item.category || "").trim().toLowerCase())
+          .map((item) => normalizeCategoryId(item.category))
           .filter(Boolean)
       )
     );
@@ -79,8 +93,7 @@ export default function ShopScreen() {
       return imageMap[item.image];
     }
 
-    const category = String(item.category || "").trim().toLowerCase();
-    return (CATEGORY_META[category] && CATEGORY_META[category].icon) || "📦";
+    return getCategoryIcon(item.category);
   };
 
   useEffect(() => {
@@ -117,7 +130,7 @@ export default function ShopScreen() {
 
     // Filter by category
     if (selectedCategory !== "all") {
-      filtered = filtered.filter((p) => p.category === selectedCategory);
+      filtered = filtered.filter((p) => normalizeCategoryId(p.category) === selectedCategory);
     }
 
     // Filter by search query
@@ -252,14 +265,27 @@ export default function ShopScreen() {
             ]}
             onPress={() => setSelectedCategory(cat.id)}
           >
-            <Text
-              style={[
-                styles.categoryText,
-                selectedCategory === cat.id && styles.categoryTextActive,
-              ]}
-            >
-              {formatCategoryLabel(cat.id)}
-            </Text>
+            <View style={styles.categoryChipInner}>
+              <Text
+                allowFontScaling={false}
+                style={[
+                  styles.categoryIcon,
+                  selectedCategory === cat.id && styles.categoryIconActive,
+                ]}
+              >
+                {getCategoryIcon(cat.id)}
+              </Text>
+              <Text
+                allowFontScaling={false}
+                numberOfLines={1}
+                style={[
+                  styles.categoryText,
+                  selectedCategory === cat.id && styles.categoryTextActive,
+                ]}
+              >
+                {getCategoryName(cat.id)}
+              </Text>
+            </View>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -326,10 +352,24 @@ const styles = StyleSheet.create({
   categoryButton: {
     borderWidth: 1,
     borderColor: "#ddd",
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    minWidth: 110,
+    height: 52,
+    justifyContent: "center",
     marginRight: 10,
+  },
+  categoryChipInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  categoryIcon: {
+    fontSize: 17,
+    marginRight: 6,
+  },
+  categoryIconActive: {
+    opacity: 1,
   },
   categoryButtonActive: {
     backgroundColor: "#4CAF50",
@@ -337,6 +377,7 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: 14,
+    fontWeight: "600",
     color: "#666",
   },
   categoryTextActive: {
