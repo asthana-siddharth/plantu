@@ -14,3 +14,8 @@ export async function getOrderById(orderId) {
 	const response = await API.get(`/orders/${orderId}`);
 	return extractData(response);
 }
+
+export async function cancelOrder(orderId) {
+	const response = await API.post(`/orders/${orderId}/cancel`);
+	return extractData(response);
+}

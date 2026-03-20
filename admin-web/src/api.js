@@ -22,6 +22,11 @@ export async function patchOrderStatus(id, status) {
   return response?.data?.data;
 }
 
+export async function patchBulkOrderStatus(orderIds, status) {
+  const response = await API.patch("/admin/orders/bulk-status", { orderIds, status });
+  return response?.data?.data;
+}
+
 export async function patchInventory(id, stockQty) {
   const response = await API.patch(`/admin/inventory/${id}`, { stockQty });
   return response?.data?.data;
@@ -46,5 +51,20 @@ export async function createProduct(payload) {
 
 export async function createService(payload) {
   const response = await API.post("/admin/services", payload);
+  return response?.data?.data;
+}
+
+export async function createCustomer(payload) {
+  const response = await API.post("/admin/customers", payload);
+  return response?.data?.data;
+}
+
+export async function upsertTaxRule(payload) {
+  const response = await API.post("/admin/tax-rules", payload);
+  return response?.data?.data;
+}
+
+export async function updateTaxRule(id, payload) {
+  const response = await API.put(`/admin/tax-rules/${id}`, payload);
   return response?.data?.data;
 }

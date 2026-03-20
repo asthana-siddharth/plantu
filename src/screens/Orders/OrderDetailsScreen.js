@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { getOrderById } from "../../services/orderService";
+import { cancelOrder, getOrderById } from "../../services/orderService";
 
 function normalizeLineItem(rawItem = {}, index = 0) {
   const type = String(rawItem.type || "product").toLowerCase();
@@ -26,6 +27,7 @@ export default function OrderDetailsScreen({ route, navigation }) {
   const { orderId, order: prefetchedOrder } = route.params || {};
   const [order, setOrder] = useState(prefetchedOrder || null);
   const [loading, setLoading] = useState(!prefetchedOrder);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -100,6 +102,25 @@ export default function OrderDetailsScreen({ route, navigation }) {
     });
   };
 
+  const canCancelOrder = String(order?.status || "").trim() === "Placed";
+
+  async function handleCancelOrder() {
+    if (!order?.id || !canCancelOrder || cancelling) {
+      return;
+    }
+
+    setCancelling(true);
+    try {
+      const updated = await cancelOrder(order.id);
+      setOrder(updated);
+      Alert.alert("Order", "Order cancelled successfully.");
+    } catch (cancelError) {
+      Alert.alert("Order", cancelError?.response?.data?.message || "Unable to cancel this order.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -168,6 +189,10 @@ export default function OrderDetailsScreen({ route, navigation }) {
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.totalLabel}>Subtotal</Text>
+        <Text style={styles.totalMeta}>₹{Math.round(Number(order.subtotal ?? order.total ?? 0))}</Text>
+        <Text style={styles.totalLabel}>Tax</Text>
+        <Text style={styles.totalMeta}>₹{Math.round(Number(order.taxTotal || 0))}</Text>
         <Text style={styles.totalLabel}>Grand Total</Text>
         <Text style={styles.totalValue}>₹{Math.round(Number(order.total || 0))}</Text>
       </View>
@@ -175,6 +200,16 @@ export default function OrderDetailsScreen({ route, navigation }) {
       <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate("OrderSummary")}>
         <Text style={styles.primaryButtonText}>Go to Order Summary</Text>
       </TouchableOpacity>
+
+      {canCancelOrder && (
+        <TouchableOpacity
+          style={[styles.primaryButton, styles.cancelButton]}
+          onPress={handleCancelOrder}
+          disabled={cancelling}
+        >
+          <Text style={styles.primaryButtonText}>{cancelling ? "Cancelling..." : "Cancel Order"}</Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 }
@@ -201,6 +236,7 @@ const styles = StyleSheet.create({
   itemPrice: { fontSize: 14, fontWeight: "700", color: "#1f6f45" },
   emptyHint: { fontSize: 13, color: "#758", paddingVertical: 4 },
   totalLabel: { fontSize: 14, color: "#556" },
+  totalMeta: { fontSize: 16, fontWeight: "700", color: "#2f5f4a", marginBottom: 6 },
   totalValue: { fontSize: 26, fontWeight: "800", color: "#1f6f45", marginTop: 3 },
   primaryButton: {
     backgroundColor: "#4CAF50",
@@ -208,6 +244,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
     marginTop: 8,
+  },
+  cancelButton: {
+    backgroundColor: "#C62828",
+    marginTop: 10,
   },
   primaryButtonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   errorText: { color: "#d32f2f", marginBottom: 12 },

@@ -4,6 +4,10 @@ const { products, devices, orders } = require("./data");
 let primaryPool;
 const TEMP_INVENTORY_BASELINE = 10;
 
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
 function parseList(value) {
   if (Array.isArray(value)) {
     return value;
@@ -59,6 +63,8 @@ function mapOrder(row) {
     date: row.date,
     status: row.status,
     items: row.items,
+    subtotal: Number(row.subtotal_amount ?? row.total ?? 0),
+    taxTotal: Number(row.tax_total ?? 0),
     total: Number(row.total),
     items_list: parseList(row.items_list),
     order_items: parseList(row.order_items),
@@ -171,6 +177,8 @@ async function initializeSchema() {
       date VARCHAR(120) NOT NULL,
       status VARCHAR(64) NOT NULL,
       items INT NOT NULL,
+      subtotal_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      tax_total DECIMAL(12, 2) NOT NULL DEFAULT 0,
       total DECIMAL(12, 2) NOT NULL,
       items_list JSON NOT NULL,
       order_items JSON NULL,
@@ -190,6 +198,14 @@ async function initializeSchema() {
 
   if (!(await columnExists("orders", "payment_status"))) {
     await queryPrimary("ALTER TABLE orders ADD COLUMN payment_status VARCHAR(32) NOT NULL DEFAULT 'paid'");
+  }
+
+  if (!(await columnExists("orders", "subtotal_amount"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN subtotal_amount DECIMAL(12, 2) NOT NULL DEFAULT 0");
+  }
+
+  if (!(await columnExists("orders", "tax_total"))) {
+    await queryPrimary("ALTER TABLE orders ADD COLUMN tax_total DECIMAL(12, 2) NOT NULL DEFAULT 0");
   }
 
   await queryPrimary(`
@@ -239,6 +255,17 @@ async function initializeSchema() {
   if (!(await columnExists("services", "image"))) {
     await queryPrimary("ALTER TABLE services ADD COLUMN image VARCHAR(24) NULL");
   }
+
+  await queryPrimary(`
+    CREATE TABLE IF NOT EXISTS tax_rules (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      scope ENUM('item', 'service') NOT NULL UNIQUE,
+      tax_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      description VARCHAR(255) NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
 }
 
 async function seedIfEmpty() {
@@ -278,13 +305,15 @@ async function seedIfEmpty() {
   if (orderCountRows[0].count === 0) {
     for (const item of orders) {
       await queryPrimary(
-        `INSERT INTO orders (id, date, status, items, total, items_list, order_items, payment_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO orders (id, date, status, items, subtotal_amount, tax_total, total, items_list, order_items, payment_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           item.id,
           item.date,
           item.status,
           item.items,
+          item.total,
+          0,
           item.total,
           toDbList(item.items_list),
           toDbList(item.order_items || []),
@@ -303,6 +332,18 @@ async function seedIfEmpty() {
         "svc_balcony", "Balcony Garden Care", "Monthly maintenance for balcony plants", "gardener-visit", 45, "🪴", 499, 1,
         "svc_villa", "Villa / Lawn Maintenance", "Comprehensive care for villa gardens and lawns", "gardener-visit", 90, "🏡", 899, 1,
         "svc_plant_doctor", "Plant Doctor Visit", "One-time expert diagnosis and treatment", "plant-doctor", 60, "🩺", 699, 1,
+      ]
+    );
+  }
+
+  const taxRuleCountRows = await queryPrimary("SELECT COUNT(1) AS count FROM tax_rules");
+  if (taxRuleCountRows[0].count === 0) {
+    await queryPrimary(
+      `INSERT INTO tax_rules (scope, tax_percent, is_active, description)
+       VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+      [
+        "item", 18, 1, "Default GST for physical items",
+        "service", 18, 1, "Default GST for services",
       ]
     );
   }
@@ -398,6 +439,30 @@ async function getOrderByIdFromPrimary(id, userId) {
   return rows.length ? mapOrder(rows[0]) : null;
 }
 
+async function cancelOrderForUser(id, userId) {
+  const rows = await queryPrimary("SELECT * FROM orders WHERE id = ? AND user_id = ?", [id, userId]);
+  if (!rows.length) {
+    return null;
+  }
+
+  const currentStatus = String(rows[0].status || "Placed").trim();
+  if (currentStatus === "Confirmed") {
+    const error = new Error("Order cannot be cancelled after confirmation");
+    error.code = "CANCEL_NOT_ALLOWED";
+    throw error;
+  }
+
+  if (currentStatus !== "Placed") {
+    const error = new Error(`Order cannot be cancelled from ${currentStatus} status`);
+    error.code = "CANCEL_NOT_ALLOWED";
+    throw error;
+  }
+
+  await queryPrimary("UPDATE orders SET status = ? WHERE id = ? AND user_id = ?", ["Cancelled", id, userId]);
+  const updated = await queryPrimary("SELECT * FROM orders WHERE id = ? AND user_id = ?", [id, userId]);
+  return updated.length ? mapOrder(updated[0]) : null;
+}
+
 async function getNextOrderNumber() {
   const rows = await queryPrimary(
     `SELECT MAX(CAST(SUBSTRING(id, 4) AS UNSIGNED)) AS max_num
@@ -429,13 +494,15 @@ async function decrementProductStock(id, quantity, connection) {
 async function createOrderInPrimary(order, connection) {
   const db = connection || primaryPool;
   await db.query(
-    `INSERT INTO orders (id, date, status, items, total, items_list, order_items, user_id, payment_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO orders (id, date, status, items, subtotal_amount, tax_total, total, items_list, order_items, user_id, payment_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       order.id,
       order.date,
       order.status,
       order.items,
+      roundMoney(order.subtotal || 0),
+      roundMoney(order.taxTotal || 0),
       order.total,
       toDbList(order.items_list),
       toDbList(order.order_items || []),
@@ -545,6 +612,33 @@ async function getServiceById(id) {
   return rows.length ? mapService(rows[0]) : null;
 }
 
+async function listTaxRules() {
+  return querySecondary(
+    "SELECT id, scope, tax_percent, is_active, description, updated_at FROM tax_rules ORDER BY scope ASC"
+  );
+}
+
+async function getTaxConfigMap() {
+  const rows = await listTaxRules();
+  const activeRows = rows.filter((row) => Number(row.is_active) === 1);
+
+  const itemRow = activeRows.find((row) => row.scope === "item");
+  const serviceRow = activeRows.find((row) => row.scope === "service");
+
+  return {
+    itemTaxPercent: Number(itemRow?.tax_percent || 0),
+    serviceTaxPercent: Number(serviceRow?.tax_percent || 0),
+    rules: rows.map((row) => ({
+      id: row.id,
+      scope: row.scope,
+      taxPercent: Number(row.tax_percent || 0),
+      isActive: Boolean(row.is_active),
+      description: row.description || "",
+      updatedAt: row.updated_at,
+    })),
+  };
+}
+
 async function withPrimaryTransaction(executor) {
   const connection = await primaryPool.getConnection();
   try {
@@ -582,6 +676,7 @@ module.exports = {
   patchDevice,
   listOrdersFromPrimary,
   getOrderByIdFromPrimary,
+  cancelOrderForUser,
   getNextOrderNumber,
   getProductStockById,
   decrementProductStock,
@@ -594,4 +689,6 @@ module.exports = {
   updateUserProfile,
   listServices,
   getServiceById,
+  listTaxRules,
+  getTaxConfigMap,
 };

@@ -57,6 +57,13 @@ body {
   align-items: center;
 }
 
+.sectionHeading {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
+}
+
 .refreshBtn {
   border: none;
   background: #0f766e;
@@ -96,6 +103,11 @@ body {
 
 .inlineForm .secondaryBtn {
   background: #64748b;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
 }
 
 .tableWrap {

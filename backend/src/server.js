@@ -11,6 +11,7 @@ const {
   patchDevice,
   listOrdersFromPrimary,
   getOrderByIdFromPrimary,
+  cancelOrderForUser,
   getNextOrderNumber,
   getProductStockById,
   decrementProductStock,
@@ -23,6 +24,7 @@ const {
   updateUserProfile,
   listServices,
   getServiceById,
+  getTaxConfigMap,
 } = require("./db");
 
 const app = express();
@@ -98,6 +100,10 @@ async function requireAuth(req, res, next) {
 
 function normalizeOrderStatus(status) {
   return String(status || "").trim() || "Placed";
+}
+
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
 }
 
 app.get("/health", (_req, res) => {
@@ -224,6 +230,14 @@ app.get("/services/:id", async (req, res) => {
   }
 });
 
+app.get("/tax-config", async (_req, res) => {
+  try {
+    return ok(res, await getTaxConfigMap());
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch tax config: ${error.message}`);
+  }
+});
+
 app.get("/devices", async (_req, res) => {
   try {
     const items = await listDevices();
@@ -300,6 +314,21 @@ app.get("/orders/:id", requireAuth, async (req, res) => {
   }
 });
 
+app.post("/orders/:id/cancel", requireAuth, async (req, res) => {
+  try {
+    const updated = await cancelOrderForUser(req.params.id, req.auth.user.id);
+    if (!updated) {
+      return fail(res, 404, "Order not found");
+    }
+    return ok(res, updated);
+  } catch (error) {
+    if (error.code === "CANCEL_NOT_ALLOWED") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to cancel order: ${error.message}`);
+  }
+});
+
 app.post("/orders", requireAuth, async (req, res) => {
   const { items } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) {
@@ -315,7 +344,9 @@ app.post("/orders", requireAuth, async (req, res) => {
     const orderId = `ORD${String(nextNum).padStart(3, "0")}`;
     const normalizedItems = [];
 
-    let total = 0;
+    const taxConfig = await getTaxConfigMap();
+    let subtotal = 0;
+    let taxTotal = 0;
     let totalUnits = 0;
 
     for (const item of items) {
@@ -324,16 +355,24 @@ app.post("/orders", requireAuth, async (req, res) => {
 
       if (type === "service") {
         const linePrice = Number(item.product?.price || item.price || 0);
+        const lineSubtotal = roundMoney(linePrice * quantity);
+        const taxPercent = Number(taxConfig.serviceTaxPercent || 0);
+        const lineTax = roundMoney((lineSubtotal * taxPercent) / 100);
+        const lineTotal = roundMoney(lineSubtotal + lineTax);
         const title = item.product?.name || item.product?.title || "Service";
         normalizedItems.push({
           type,
           id: String(item.product?.id || item.id || title),
           name: title,
           unitPrice: linePrice,
+          taxPercent,
           quantity,
-          lineTotal: linePrice * quantity,
+          lineSubtotal,
+          lineTax,
+          lineTotal,
         });
-        total += linePrice * quantity;
+        subtotal += lineSubtotal;
+        taxTotal += lineTax;
         totalUnits += quantity;
         continue;
       }
@@ -349,23 +388,35 @@ app.post("/orders", requireAuth, async (req, res) => {
       }
 
       const linePrice = Number(item.product?.price || stockRow.price || 0);
+      const lineSubtotal = roundMoney(linePrice * quantity);
+      const taxPercent = Number(taxConfig.itemTaxPercent || 0);
+      const lineTax = roundMoney((lineSubtotal * taxPercent) / 100);
+      const lineTotal = roundMoney(lineSubtotal + lineTax);
       normalizedItems.push({
         type: "product",
         id: productId,
         name: item.product?.name || stockRow.name,
         unitPrice: linePrice,
+        taxPercent,
         quantity,
-        lineTotal: linePrice * quantity,
+        lineSubtotal,
+        lineTax,
+        lineTotal,
       });
-      total += linePrice * quantity;
+      subtotal += lineSubtotal;
+      taxTotal += lineTax;
       totalUnits += quantity;
     }
+
+    const total = roundMoney(subtotal + taxTotal);
 
     const order = {
       id: orderId,
       date: getTodayLongDate(),
       status: normalizeOrderStatus(req.body?.status),
       items: totalUnits,
+      subtotal: roundMoney(subtotal),
+      taxTotal: roundMoney(taxTotal),
       total,
       items_list: normalizedItems.map((item) => item.name),
       order_items: normalizedItems,

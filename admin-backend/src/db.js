@@ -7,10 +7,15 @@ const CATEGORY_HEADS = {
   SERVICE: "service",
 };
 
+const TAX_SCOPES = {
+  ITEM: "item",
+  SERVICE: "service",
+};
+
 const ORDER_FLOW = {
   Placed: ["Confirmed", "Cancelled"],
-  Confirmed: ["Packed", "Cancelled"],
-  Packed: ["Shipped", "Cancelled"],
+  Confirmed: ["Packed"],
+  Packed: ["Shipped"],
   Shipped: ["Out for Delivery"],
   "Out for Delivery": ["Delivered"],
   Delivered: [],
@@ -151,6 +156,17 @@ async function initSchema() {
   if (!(await columnExists("services", "image"))) {
     await query("ALTER TABLE services ADD COLUMN image VARCHAR(24) NULL");
   }
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS tax_rules (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      scope ENUM('item', 'service') NOT NULL UNIQUE,
+      tax_percent DECIMAL(5, 2) NOT NULL DEFAULT 0,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      description VARCHAR(255) NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
 }
 
 function toSlug(value) {
@@ -190,6 +206,14 @@ function normalizeBoolFilter(value) {
     return 0;
   }
   return null;
+}
+
+function normalizeTaxScope(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === TAX_SCOPES.ITEM || normalized === TAX_SCOPES.SERVICE) {
+    return normalized;
+  }
+  return "";
 }
 
 async function seedAdminData() {
@@ -258,6 +282,18 @@ async function seedAdminData() {
         "svc_balcony", "Balcony Garden Care", "Monthly maintenance for balcony plants", "gardener-visit", 45, "🪴", 499, 1,
         "svc_villa", "Villa / Lawn Maintenance", "Comprehensive care for villa gardens and lawns", "gardener-visit", 90, "🏡", 899, 1,
         "svc_plant_doctor", "Plant Doctor Visit", "One-time expert diagnosis and treatment", "plant-doctor", 60, "🩺", 699, 1,
+      ]
+    );
+  }
+
+  const taxRuleCount = await query("SELECT COUNT(1) AS count FROM tax_rules");
+  if (Number(taxRuleCount[0].count) === 0) {
+    await query(
+      `INSERT INTO tax_rules (scope, tax_percent, is_active, description)
+       VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+      [
+        TAX_SCOPES.ITEM, 18, 1, "Default GST for physical items",
+        TAX_SCOPES.SERVICE, 18, 1, "Default GST for services",
       ]
     );
   }
@@ -638,6 +674,42 @@ async function listCustomers({ search, status } = {}) {
   return query(`SELECT * FROM customers ${where} ORDER BY created_at DESC`, values);
 }
 
+async function createCustomer(payload) {
+  const name = String(payload.name || "").trim();
+  const phone = String(payload.phone || "").trim();
+  const email = String(payload.email || "").trim();
+  const status = normalizeStatusValue(payload.status) || "active";
+
+  if (!name) {
+    const error = new Error("name is required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  if (phone.length < 10) {
+    const error = new Error("phone must be at least 10 digits");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  try {
+    const result = await query(
+      `INSERT INTO customers (name, phone, email, status)
+       VALUES (?, ?, ?, ?)`,
+      [name, phone || null, email || null, status]
+    );
+    const rows = await query("SELECT * FROM customers WHERE id = ?", [result.insertId]);
+    return rows[0] || null;
+  } catch (error) {
+    if (String(error.message || "").toLowerCase().includes("duplicate")) {
+      const conflict = new Error("Customer phone already exists");
+      conflict.code = "DUPLICATE_CUSTOMER";
+      throw conflict;
+    }
+    throw error;
+  }
+}
+
 async function listOrders({ search, status, paymentStatus } = {}) {
   const clauses = [];
   const values = [];
@@ -700,6 +772,26 @@ async function updateOrderStatus(id, status) {
     order_items: parseList(rows[0].order_items),
     next_statuses: ORDER_FLOW[rows[0].status] || [],
   };
+}
+
+async function bulkUpdateOrderStatus(orderIds = [], status) {
+  const results = [];
+  const failures = [];
+
+  for (const orderId of orderIds) {
+    try {
+      const updated = await updateOrderStatus(orderId, status);
+      if (!updated) {
+        failures.push({ orderId, message: "Order not found" });
+        continue;
+      }
+      results.push(updated);
+    } catch (error) {
+      failures.push({ orderId, message: error.message });
+    }
+  }
+
+  return { updated: results, failures };
 }
 
 async function listVendors({ search, status } = {}) {
@@ -807,6 +899,98 @@ async function updatePromotion(id, patch) {
   return query("SELECT * FROM promotions WHERE id = ?", [id]);
 }
 
+async function listTaxRules({ search, scope, isActive } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedScope = normalizeTaxScope(scope);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(scope) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like);
+  }
+
+  if (normalizedScope) {
+    clauses.push("scope = ?");
+    values.push(normalizedScope);
+  }
+
+  if (normalizedIsActive !== null) {
+    clauses.push("is_active = ?");
+    values.push(normalizedIsActive);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return query(
+    `SELECT id, scope, tax_percent, is_active, description, updated_at
+     FROM tax_rules
+     ${where}
+     ORDER BY scope ASC`,
+    values
+  );
+}
+
+async function upsertTaxRule(payload) {
+  const scope = normalizeTaxScope(payload.scope);
+  const taxPercent = Number(payload.taxPercent ?? payload.tax_percent);
+  const isActive = payload.isActive == null ? 1 : (payload.isActive ? 1 : 0);
+  const description = payload.description == null ? null : String(payload.description || "").trim();
+
+  if (!scope || Number.isNaN(taxPercent) || taxPercent < 0) {
+    const error = new Error("scope and valid taxPercent are required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  await query(
+    `INSERT INTO tax_rules (scope, tax_percent, is_active, description)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       tax_percent = VALUES(tax_percent),
+       is_active = VALUES(is_active),
+       description = VALUES(description)`,
+    [scope, taxPercent, isActive, description]
+  );
+
+  const rows = await query(
+    "SELECT id, scope, tax_percent, is_active, description, updated_at FROM tax_rules WHERE scope = ?",
+    [scope]
+  );
+  return rows[0] || null;
+}
+
+async function updateTaxRule(id, payload) {
+  const existing = await query("SELECT * FROM tax_rules WHERE id = ?", [id]);
+  if (!existing.length) {
+    return null;
+  }
+
+  const current = existing[0];
+  const scope = normalizeTaxScope(payload.scope || current.scope);
+  const taxPercent = Number(payload.taxPercent ?? payload.tax_percent ?? current.tax_percent);
+  const isActive = payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0);
+  const description = payload.description == null ? current.description : String(payload.description || "").trim();
+
+  if (!scope || Number.isNaN(taxPercent) || taxPercent < 0) {
+    const error = new Error("scope and valid taxPercent are required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  await query(
+    "UPDATE tax_rules SET scope = ?, tax_percent = ?, is_active = ?, description = ? WHERE id = ?",
+    [scope, taxPercent, isActive, description, id]
+  );
+
+  const rows = await query(
+    "SELECT id, scope, tax_percent, is_active, description, updated_at FROM tax_rules WHERE id = ?",
+    [id]
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   initDb,
   checkDbHealth,
@@ -816,8 +1000,10 @@ module.exports = {
   listInventory,
   updateInventory,
   listCustomers,
+  createCustomer,
   listOrders,
   updateOrderStatus,
+  bulkUpdateOrderStatus,
   listVendors,
   createVendor,
   updateVendor,
@@ -830,4 +1016,7 @@ module.exports = {
   listServices,
   createService,
   updateService,
+  listTaxRules,
+  upsertTaxRule,
+  updateTaxRule,
 };

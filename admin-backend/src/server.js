@@ -11,8 +11,10 @@ const {
   listInventory,
   updateInventory,
   listCustomers,
+  createCustomer,
   listOrders,
   updateOrderStatus,
+  bulkUpdateOrderStatus,
   listVendors,
   createVendor,
   updateVendor,
@@ -25,6 +27,9 @@ const {
   listServices,
   createService,
   updateService,
+  listTaxRules,
+  upsertTaxRule,
+  updateTaxRule,
 } = require("./db");
 
 const app = express();
@@ -231,6 +236,18 @@ app.get("/admin/customers", async (req, res) => {
   }
 });
 
+app.post("/admin/customers", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    return ok(res, await createCustomer(payload));
+  } catch (error) {
+    if (error.code === "BAD_INPUT" || error.code === "DUPLICATE_CUSTOMER") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to create customer: ${error.message}`);
+  }
+});
+
 app.get("/admin/orders", async (req, res) => {
   try {
     return ok(res, await listOrders(req.query || {}));
@@ -252,6 +269,28 @@ app.patch("/admin/orders/:id/status", async (req, res) => {
       return fail(res, 400, error.message);
     }
     return fail(res, 500, `Failed to update order status: ${error.message}`);
+  }
+});
+
+app.patch("/admin/orders/bulk-status", async (req, res) => {
+  try {
+    const orderIds = Array.isArray(req.body?.orderIds)
+      ? req.body.orderIds.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    const status = String(req.body?.status || "").trim();
+
+    if (!orderIds.length) {
+      return fail(res, 400, "orderIds must contain at least one order id");
+    }
+
+    if (!status) {
+      return fail(res, 400, "status is required");
+    }
+
+    const result = await bulkUpdateOrderStatus(orderIds, status);
+    return ok(res, result);
+  } catch (error) {
+    return fail(res, 500, `Failed to bulk update order status: ${error.message}`);
   }
 });
 
@@ -289,6 +328,50 @@ app.get("/admin/promotions", async (req, res) => {
     return ok(res, await listPromotions(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch promotions: ${error.message}`);
+  }
+});
+
+app.get("/admin/tax-rules", async (req, res) => {
+  try {
+    return ok(res, await listTaxRules(req.query || {}));
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch tax rules: ${error.message}`);
+  }
+});
+
+app.post("/admin/tax-rules", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.scope || payload.taxPercent == null) {
+      return fail(res, 400, "scope and taxPercent are required");
+    }
+
+    return ok(res, await upsertTaxRule(payload));
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to upsert tax rule: ${error.message}`);
+  }
+});
+
+app.put("/admin/tax-rules/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid tax rule id");
+    }
+
+    const updated = await updateTaxRule(id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "Tax rule not found");
+    }
+    return ok(res, updated);
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to update tax rule: ${error.message}`);
   }
 });
 

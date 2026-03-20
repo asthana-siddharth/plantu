@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  createCustomer,
   createService,
   createProduct,
   createProductCategory,
   fetchModule,
   fetchProductCategories,
+  patchBulkOrderStatus,
   patchInventory,
   patchOrderStatus,
+  upsertTaxRule,
 } from "./api";
 
 const modules = [
@@ -18,6 +21,7 @@ const modules = [
   { key: "orders", label: "Orders", path: "/admin/orders" },
   { key: "vendors", label: "Vendors", path: "/admin/vendors" },
   { key: "promotions", label: "Promotions", path: "/admin/promotions" },
+  { key: "taxControl", label: "Tax Control", path: "/admin/tax-rules" },
 ];
 
 const ORDER_STATUSES = [
@@ -32,13 +36,14 @@ const ORDER_STATUSES = [
 
 const MODULE_FILTER_MAP = {
   products: { placeholder: "Search by product id, name, category, sku", param: "category" },
-  services: { placeholder: "Search by code, title, description", param: "category" },
+  services: { placeholder: "Search by code, title, description", param: "isActive" },
   categoryMaster: { placeholder: "Search by category name or slug", param: "head" },
   inventory: { placeholder: "Search by product id, name, category, sku", param: "stockStatus" },
   customers: { placeholder: "Search by name, phone, email", param: "status" },
   orders: { placeholder: "Search by order id, user id, date", param: "status" },
   vendors: { placeholder: "Search by name, contact, phone, email", param: "status" },
   promotions: { placeholder: "Search by code or title", param: "isActive" },
+  taxControl: { placeholder: "Search by scope or description", param: "scope" },
 };
 
 function pretty(value) {
@@ -76,6 +81,54 @@ function DataTable({ rows }) {
   );
 }
 
+function OrdersTable({ rows, selectedOrderIds, onToggleOrder, onToggleAll }) {
+  if (!rows.length) return <p className="muted">No rows found</p>;
+
+  const allSelected = rows.length > 0 && rows.every((row) => selectedOrderIds.includes(String(row.id)));
+
+  return (
+    <div className="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>
+              <input type="checkbox" checked={allSelected} onChange={onToggleAll} />
+            </th>
+            <th>id</th>
+            <th>date</th>
+            <th>status</th>
+            <th>payment_status</th>
+            <th>total</th>
+            <th>next_statuses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const orderId = String(row.id);
+            return (
+              <tr key={orderId}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedOrderIds.includes(orderId)}
+                    onChange={() => onToggleOrder(orderId)}
+                  />
+                </td>
+                <td>{pretty(row.id)}</td>
+                <td>{pretty(row.date)}</td>
+                <td>{pretty(row.status)}</td>
+                <td>{pretty(row.payment_status)}</td>
+                <td>{pretty(row.total)}</td>
+                <td>{Array.isArray(row.next_statuses) ? row.next_statuses.join(", ") : "-"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function App() {
   const [active, setActive] = useState(modules[0]);
   const [rows, setRows] = useState([]);
@@ -83,6 +136,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [orderId, setOrderId] = useState("");
   const [orderStatus, setOrderStatus] = useState("Confirmed");
+  const [bulkOrderStatus, setBulkOrderStatus] = useState("Confirmed");
+  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [inventoryId, setInventoryId] = useState("");
   const [inventoryQty, setInventoryQty] = useState("");
   const [inventoryEditCategoryFilter, setInventoryEditCategoryFilter] = useState("all");
@@ -91,6 +146,12 @@ export default function App() {
   const [categories, setCategories] = useState([]);
   const [categoryName, setCategoryName] = useState("");
   const [categoryHead, setCategoryHead] = useState("item");
+  const [customerDraft, setCustomerDraft] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    status: "active",
+  });
   const [productDraft, setProductDraft] = useState({
     id: "",
     name: "",
@@ -123,6 +184,12 @@ export default function App() {
     price: "",
     isActive: true,
   });
+  const [taxDraft, setTaxDraft] = useState({
+    scope: "item",
+    taxPercent: "18",
+    isActive: true,
+    description: "",
+  });
   const inventoryFilteredRows = useMemo(() => {
     if (inventoryEditCategoryFilter === "all") return rows;
     return rows.filter((row) => String(row.category || "") === inventoryEditCategoryFilter);
@@ -144,7 +211,11 @@ export default function App() {
       case "products":
         return [{ value: "all", label: "All Categories" }, ...itemCategories.map((cat) => ({ value: cat.slug, label: cat.name }))];
       case "services":
-        return [{ value: "all", label: "All Categories" }, ...serviceCategories.map((cat) => ({ value: cat.slug, label: cat.name }))];
+        return [
+          { value: "all", label: "All Status" },
+          { value: "active", label: "Active" },
+          { value: "inactive", label: "Inactive" },
+        ];
       case "categoryMaster":
         return [
           { value: "all", label: "All Heads" },
@@ -171,6 +242,12 @@ export default function App() {
           { value: "all", label: "All Status" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
+        ];
+      case "taxControl":
+        return [
+          { value: "all", label: "All Scopes" },
+          { value: "item", label: "Items" },
+          { value: "service", label: "Services" },
         ];
       default:
         return [{ value: "all", label: "All" }];
@@ -207,6 +284,8 @@ export default function App() {
   useEffect(() => {
     setSearchTerm("");
     setFilterValue("all");
+    setSelectedOrderIds([]);
+    setInventoryEditCategoryFilter("all");
     loadModule(active, {});
   }, [active]);
 
@@ -223,6 +302,46 @@ export default function App() {
       setOrderId("");
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Update failed");
+    }
+  }
+
+  function toggleOrderSelection(orderId) {
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  }
+
+  function toggleSelectAllOrders() {
+    if (!rows.length) {
+      setSelectedOrderIds([]);
+      return;
+    }
+
+    const visibleIds = rows.map((row) => String(row.id));
+    const allSelected = visibleIds.every((id) => selectedOrderIds.includes(id));
+    setSelectedOrderIds(allSelected ? [] : visibleIds);
+  }
+
+  async function handleBulkOrderPatch(event) {
+    event.preventDefault();
+    if (!selectedOrderIds.length) {
+      setError("Select at least one order");
+      return;
+    }
+
+    try {
+      const result = await patchBulkOrderStatus(selectedOrderIds, bulkOrderStatus.trim());
+      const failedCount = Array.isArray(result?.failures) ? result.failures.length : 0;
+      if (failedCount) {
+        setError(`${failedCount} orders could not be updated due to transition rules.`);
+      } else {
+        setError("");
+      }
+
+      setSelectedOrderIds([]);
+      await loadModule(active, buildQueryParams());
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Bulk update failed");
     }
   }
 
@@ -250,6 +369,7 @@ export default function App() {
   async function handleResetSearchFilters() {
     setSearchTerm("");
     setFilterValue("all");
+    setSelectedOrderIds([]);
     await loadModule(active, {});
   }
 
@@ -264,6 +384,24 @@ export default function App() {
       await Promise.all([loadCategories(), loadModule(active, buildQueryParams())]);
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Create category failed");
+    }
+  }
+
+  async function handleCreateCustomer(event) {
+    event.preventDefault();
+    if (!customerDraft.name.trim() || !customerDraft.phone.trim()) return;
+
+    try {
+      await createCustomer({
+        name: customerDraft.name.trim(),
+        phone: customerDraft.phone.trim(),
+        email: customerDraft.email.trim(),
+        status: customerDraft.status,
+      });
+      setCustomerDraft({ name: "", phone: "", email: "", status: "active" });
+      await loadModule(active, buildQueryParams());
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Create customer failed");
     }
   }
 
@@ -337,6 +475,25 @@ export default function App() {
     }
   }
 
+  async function handleUpsertTaxRule(event) {
+    event.preventDefault();
+
+    const taxPercent = Number(taxDraft.taxPercent);
+    if (!taxDraft.scope.trim() || Number.isNaN(taxPercent) || taxPercent < 0) return;
+
+    try {
+      await upsertTaxRule({
+        scope: taxDraft.scope,
+        taxPercent,
+        isActive: taxDraft.isActive,
+        description: taxDraft.description.trim(),
+      });
+      await loadModule(active, buildQueryParams());
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Save tax rule failed");
+    }
+  }
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -355,11 +512,9 @@ export default function App() {
       <main className="content">
         <div className="headerRow">
           <h1>{activeLabel}</h1>
-          <button className="refreshBtn" onClick={() => loadModule(active, buildQueryParams())}>
-            Refresh
-          </button>
         </div>
 
+        <h3 className="sectionHeading">Search & Filters</h3>
         <form className="inlineForm filterForm" onSubmit={handleApplySearchFilters}>
           <input
             placeholder={activeFilterConfig.placeholder}
@@ -382,27 +537,46 @@ export default function App() {
         </form>
 
         {active.key === "orders" && (
-          <form className="inlineForm" onSubmit={handleOrderPatch}>
-            <input
-              placeholder="Order ID (e.g. ORD004)"
-              value={orderId}
-              onChange={(e) => setOrderId(e.target.value)}
-            />
-            <select
-              value={orderStatus}
-              onChange={(e) => setOrderStatus(e.target.value)}
-            >
-              {ORDER_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-            <button type="submit">Update Status</button>
-          </form>
+          <>
+            <h3 className="sectionHeading">Order Actions</h3>
+            <form className="inlineForm" onSubmit={handleBulkOrderPatch}>
+              <select
+                value={bulkOrderStatus}
+                onChange={(e) => setBulkOrderStatus(e.target.value)}
+              >
+                {ORDER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+              <button type="submit">Apply To Selected ({selectedOrderIds.length})</button>
+            </form>
+
+            <form className="inlineForm" onSubmit={handleOrderPatch}>
+              <input
+                placeholder="Single Order ID (e.g. ORD004)"
+                value={orderId}
+                onChange={(e) => setOrderId(e.target.value)}
+              />
+              <select
+                value={orderStatus}
+                onChange={(e) => setOrderStatus(e.target.value)}
+              >
+                {ORDER_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+              <button type="submit">Update One Order</button>
+            </form>
+          </>
         )}
 
         {active.key === "inventory" && (
+          <>
+          <h3 className="sectionHeading">Inventory Actions</h3>
           <form className="inlineForm" onSubmit={handleInventoryPatch}>
             <select
               value={inventoryEditCategoryFilter}
@@ -437,9 +611,12 @@ export default function App() {
             />
             <button type="submit">Update Stock</button>
           </form>
+          </>
         )}
 
         {active.key === "products" && (
+          <>
+          <h3 className="sectionHeading">Add Product</h3>
           <form className="inlineForm" onSubmit={handleCreateProduct}>
             <input
               placeholder="ID"
@@ -489,9 +666,12 @@ export default function App() {
             />
             <button type="submit">Add Product</button>
           </form>
+          </>
         )}
 
         {active.key === "services" && (
+          <>
+          <h3 className="sectionHeading">Add Service</h3>
           <form className="inlineForm" onSubmit={handleCreateService}>
             <input
               placeholder="Service Code"
@@ -536,9 +716,12 @@ export default function App() {
             />
             <button type="submit">Add Service</button>
           </form>
+          </>
         )}
 
         {active.key === "categoryMaster" && (
+          <>
+          <h3 className="sectionHeading">Add Category</h3>
           <form className="inlineForm" onSubmit={handleCreateCategory}>
             <input
               placeholder="Category Name"
@@ -554,12 +737,88 @@ export default function App() {
             </select>
             <button type="submit">Add Category</button>
           </form>
+          </>
+        )}
+
+        {active.key === "customers" && (
+          <>
+          <h3 className="sectionHeading">Add Customer</h3>
+          <form className="inlineForm" onSubmit={handleCreateCustomer}>
+            <input
+              placeholder="Customer Name"
+              value={customerDraft.name}
+              onChange={(e) => setCustomerDraft((prev) => ({ ...prev, name: e.target.value }))}
+            />
+            <input
+              placeholder="Phone"
+              value={customerDraft.phone}
+              onChange={(e) => setCustomerDraft((prev) => ({ ...prev, phone: e.target.value }))}
+            />
+            <input
+              placeholder="Email"
+              value={customerDraft.email}
+              onChange={(e) => setCustomerDraft((prev) => ({ ...prev, email: e.target.value }))}
+            />
+            <select
+              value={customerDraft.status}
+              onChange={(e) => setCustomerDraft((prev) => ({ ...prev, status: e.target.value }))}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <button type="submit">Add Customer</button>
+          </form>
+          </>
+        )}
+
+        {active.key === "taxControl" && (
+          <>
+          <h3 className="sectionHeading">Tax Rule</h3>
+          <form className="inlineForm" onSubmit={handleUpsertTaxRule}>
+            <select
+              value={taxDraft.scope}
+              onChange={(e) => setTaxDraft((prev) => ({ ...prev, scope: e.target.value }))}
+            >
+              <option value="item">Items</option>
+              <option value="service">Services</option>
+            </select>
+            <input
+              placeholder="Tax Percent"
+              value={taxDraft.taxPercent}
+              onChange={(e) => setTaxDraft((prev) => ({ ...prev, taxPercent: e.target.value }))}
+            />
+            <select
+              value={taxDraft.isActive ? "active" : "inactive"}
+              onChange={(e) =>
+                setTaxDraft((prev) => ({ ...prev, isActive: e.target.value === "active" }))
+              }
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <input
+              placeholder="Description"
+              value={taxDraft.description}
+              onChange={(e) => setTaxDraft((prev) => ({ ...prev, description: e.target.value }))}
+            />
+            <button type="submit">Save Tax Rule</button>
+          </form>
+          </>
         )}
 
         {loading && <p className="muted">Loading...</p>}
         {error && <p className="error">{error}</p>}
         {!loading && !error && (
-          <DataTable rows={active.key === "inventory" ? inventoryFilteredRows : rows} />
+          active.key === "orders" ? (
+            <OrdersTable
+              rows={rows}
+              selectedOrderIds={selectedOrderIds}
+              onToggleOrder={toggleOrderSelection}
+              onToggleAll={toggleSelectAllOrders}
+            />
+          ) : (
+            <DataTable rows={active.key === "inventory" ? inventoryFilteredRows : rows} />
+          )
         )}
       </main>
     </div>
