@@ -89,6 +89,15 @@ body {
   cursor: pointer;
 }
 
+.inlineForm.filterForm {
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.inlineForm .secondaryBtn {
+  background: #64748b;
+}
+
 .tableWrap {
   overflow: auto;
   background: #fff;

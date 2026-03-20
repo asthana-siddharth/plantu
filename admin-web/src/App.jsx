@@ -30,6 +30,17 @@ const ORDER_STATUSES = [
   "Cancelled",
 ];
 
+const MODULE_FILTER_MAP = {
+  products: { placeholder: "Search by product id, name, category, sku", param: "category" },
+  services: { placeholder: "Search by code, title, description", param: "category" },
+  categoryMaster: { placeholder: "Search by category name or slug", param: "head" },
+  inventory: { placeholder: "Search by product id, name, category, sku", param: "stockStatus" },
+  customers: { placeholder: "Search by name, phone, email", param: "status" },
+  orders: { placeholder: "Search by order id, user id, date", param: "status" },
+  vendors: { placeholder: "Search by name, contact, phone, email", param: "status" },
+  promotions: { placeholder: "Search by code or title", param: "isActive" },
+};
+
 function pretty(value) {
   if (value == null) return "-";
   if (Array.isArray(value)) return value.join(", ");
@@ -74,7 +85,9 @@ export default function App() {
   const [orderStatus, setOrderStatus] = useState("Confirmed");
   const [inventoryId, setInventoryId] = useState("");
   const [inventoryQty, setInventoryQty] = useState("");
-  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState("all");
+  const [inventoryEditCategoryFilter, setInventoryEditCategoryFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterValue, setFilterValue] = useState("all");
   const [categories, setCategories] = useState([]);
   const [categoryName, setCategoryName] = useState("");
   const [categoryHead, setCategoryHead] = useState("item");
@@ -111,10 +124,9 @@ export default function App() {
     isActive: true,
   });
   const inventoryFilteredRows = useMemo(() => {
-    if (active.key !== "inventory") return rows;
-    if (inventoryCategoryFilter === "all") return rows;
-    return rows.filter((row) => String(row.category || "") === inventoryCategoryFilter);
-  }, [rows, inventoryCategoryFilter, active.key]);
+    if (inventoryEditCategoryFilter === "all") return rows;
+    return rows.filter((row) => String(row.category || "") === inventoryEditCategoryFilter);
+  }, [rows, inventoryEditCategoryFilter]);
 
   async function loadCategories() {
     try {
@@ -126,11 +138,63 @@ export default function App() {
     }
   }
 
-  async function loadModule(moduleObj) {
+  const activeFilterConfig = MODULE_FILTER_MAP[active.key] || { placeholder: "Search", param: "" };
+  const activeFilterOptions = useMemo(() => {
+    switch (active.key) {
+      case "products":
+        return [{ value: "all", label: "All Categories" }, ...itemCategories.map((cat) => ({ value: cat.slug, label: cat.name }))];
+      case "services":
+        return [{ value: "all", label: "All Categories" }, ...serviceCategories.map((cat) => ({ value: cat.slug, label: cat.name }))];
+      case "categoryMaster":
+        return [
+          { value: "all", label: "All Heads" },
+          { value: "item", label: "Items" },
+          { value: "service", label: "Services" },
+        ];
+      case "inventory":
+        return [
+          { value: "all", label: "All Stock Status" },
+          { value: "low", label: "Low Stock" },
+          { value: "ok", label: "In Stock" },
+        ];
+      case "customers":
+      case "vendors":
+        return [
+          { value: "all", label: "All Status" },
+          { value: "active", label: "Active" },
+          { value: "inactive", label: "Inactive" },
+        ];
+      case "orders":
+        return [{ value: "all", label: "All Status" }, ...ORDER_STATUSES.map((status) => ({ value: status, label: status }))];
+      case "promotions":
+        return [
+          { value: "all", label: "All Status" },
+          { value: "active", label: "Active" },
+          { value: "inactive", label: "Inactive" },
+        ];
+      default:
+        return [{ value: "all", label: "All" }];
+    }
+  }, [active.key, itemCategories, serviceCategories]);
+
+  function buildQueryParams() {
+    const params = {};
+    if (searchTerm.trim()) {
+      params.search = searchTerm.trim();
+    }
+
+    if (filterValue !== "all" && activeFilterConfig.param) {
+      params[activeFilterConfig.param] = filterValue;
+    }
+
+    return params;
+  }
+
+  async function loadModule(moduleObj, params = {}) {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchModule(moduleObj.path);
+      const data = await fetchModule(moduleObj.path, params);
       setRows(data);
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Request failed");
@@ -141,7 +205,9 @@ export default function App() {
   }
 
   useEffect(() => {
-    loadModule(active);
+    setSearchTerm("");
+    setFilterValue("all");
+    loadModule(active, {});
   }, [active]);
 
   useEffect(() => {
@@ -153,7 +219,7 @@ export default function App() {
     if (!orderId.trim()) return;
     try {
       await patchOrderStatus(orderId.trim(), orderStatus.trim());
-      await loadModule(active);
+      await loadModule(active, buildQueryParams());
       setOrderId("");
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Update failed");
@@ -168,12 +234,23 @@ export default function App() {
 
     try {
       await patchInventory(id, qty);
-      await loadModule(active);
+      await loadModule(active, buildQueryParams());
       setInventoryId("");
       setInventoryQty("");
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Update failed");
     }
+  }
+
+  async function handleApplySearchFilters(event) {
+    event.preventDefault();
+    await loadModule(active, buildQueryParams());
+  }
+
+  async function handleResetSearchFilters() {
+    setSearchTerm("");
+    setFilterValue("all");
+    await loadModule(active, {});
   }
 
   async function handleCreateCategory(event) {
@@ -184,7 +261,7 @@ export default function App() {
       await createProductCategory({ name: categoryName.trim(), head: categoryHead.trim() });
       setCategoryName("");
       setCategoryHead("item");
-      await Promise.all([loadCategories(), loadModule(active)]);
+      await Promise.all([loadCategories(), loadModule(active, buildQueryParams())]);
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Create category failed");
     }
@@ -221,7 +298,7 @@ export default function App() {
         description: "",
         stockQty: "10",
       }));
-      await loadModule(active);
+      await loadModule(active, buildQueryParams());
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Create product failed");
     }
@@ -254,7 +331,7 @@ export default function App() {
         description: "",
         price: "",
       }));
-      await loadModule(active);
+      await loadModule(active, buildQueryParams());
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Create service failed");
     }
@@ -278,10 +355,31 @@ export default function App() {
       <main className="content">
         <div className="headerRow">
           <h1>{activeLabel}</h1>
-          <button className="refreshBtn" onClick={() => loadModule(active)}>
+          <button className="refreshBtn" onClick={() => loadModule(active, buildQueryParams())}>
             Refresh
           </button>
         </div>
+
+        <form className="inlineForm filterForm" onSubmit={handleApplySearchFilters}>
+          <input
+            placeholder={activeFilterConfig.placeholder}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {activeFilterConfig.param ? (
+            <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)}>
+              {activeFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <button type="submit">Apply</button>
+          <button type="button" className="secondaryBtn" onClick={handleResetSearchFilters}>
+            Reset
+          </button>
+        </form>
 
         {active.key === "orders" && (
           <form className="inlineForm" onSubmit={handleOrderPatch}>
@@ -307,10 +405,10 @@ export default function App() {
         {active.key === "inventory" && (
           <form className="inlineForm" onSubmit={handleInventoryPatch}>
             <select
-              value={inventoryCategoryFilter}
+              value={inventoryEditCategoryFilter}
               onChange={(e) => {
                 const next = e.target.value;
-                setInventoryCategoryFilter(next);
+                setInventoryEditCategoryFilter(next);
                 setInventoryId("");
               }}
             >

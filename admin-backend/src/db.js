@@ -171,6 +171,27 @@ function normalizeCategoryHead(head) {
   return "";
 }
 
+function normalizeSearchTerm(value) {
+  const normalized = String(value || "").trim();
+  return normalized.length ? normalized : "";
+}
+
+function normalizeStatusValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.length ? normalized : "";
+}
+
+function normalizeBoolFilter(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "active", "yes"].includes(normalized)) {
+    return 1;
+  }
+  if (["0", "false", "inactive", "no"].includes(normalized)) {
+    return 0;
+  }
+  return null;
+}
+
 async function seedAdminData() {
   const customersCount = await query("SELECT COUNT(1) AS count FROM customers");
   if (Number(customersCount[0].count) === 0) {
@@ -259,8 +280,25 @@ async function checkDbHealth() {
   }
 }
 
-async function listProducts() {
-  return query("SELECT * FROM products ORDER BY id ASC");
+async function listProducts({ search, category } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedCategory = toSlug(category);
+
+  if (normalizedSearch) {
+    clauses.push("(CAST(id AS CHAR) LIKE ? OR LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(COALESCE(sku, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like, like);
+  }
+
+  if (normalizedCategory) {
+    clauses.push("category = ?");
+    values.push(normalizedCategory);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return query(`SELECT * FROM products ${where} ORDER BY id ASC`, values);
 }
 
 async function getProductCategoryBySlug(slug) {
@@ -329,27 +367,72 @@ async function updateProduct(id, patch) {
   return query("SELECT * FROM products WHERE id = ?", [id]);
 }
 
-async function listInventory() {
+async function listInventory({ search, category, stockStatus } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedCategory = toSlug(category);
+  const normalizedStockStatus = normalizeStatusValue(stockStatus);
+
+  if (normalizedSearch) {
+    clauses.push("(CAST(id AS CHAR) LIKE ? OR LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(COALESCE(sku, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like, like);
+  }
+
+  if (normalizedCategory) {
+    clauses.push("category = ?");
+    values.push(normalizedCategory);
+  }
+
+  if (normalizedStockStatus === "low") {
+    clauses.push("stock_qty <= 5");
+  } else if (normalizedStockStatus === "ok") {
+    clauses.push("stock_qty > 5");
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
   return query(
     `SELECT id, name, category, sku, stock_qty, in_stock,
             CASE WHEN stock_qty <= 5 THEN 'LOW' ELSE 'OK' END AS stock_status
      FROM products
-     ORDER BY stock_qty ASC, id ASC`
+     ${where}
+     ORDER BY stock_qty ASC, id ASC`,
+    values
   );
 }
 
-async function listProductCategories({ head } = {}) {
+async function listProductCategories({ head, search, isActive } = {}) {
+  const clauses = [];
+  const values = [];
   const normalizedHead = normalizeCategoryHead(head);
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+
   if (normalizedHead) {
-    return query(
-      "SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories WHERE head = ? ORDER BY name ASC",
-      [normalizedHead]
-    );
+    clauses.push("head = ?");
+    values.push(normalizedHead);
   }
 
-  return query(
-    "SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories ORDER BY head ASC, name ASC"
-  );
+  if (normalizedSearch) {
+    clauses.push("(LOWER(name) LIKE ? OR LOWER(slug) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like);
+  }
+
+  if (normalizedIsActive !== null) {
+    clauses.push("is_active = ?");
+    values.push(normalizedIsActive);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
+  if (normalizedHead) {
+    return query(`SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories ${where} ORDER BY name ASC`, values);
+  }
+
+  return query(`SELECT id, name, slug, head, is_active, created_at, updated_at FROM product_categories ${where} ORDER BY head ASC, name ASC`, values);
 }
 
 async function createProductCategory(payload) {
@@ -422,11 +505,36 @@ async function updateProductCategory(id, payload) {
   return rows[0] || null;
 }
 
-async function listServices() {
+async function listServices({ search, category, isActive } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedCategory = toSlug(category);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(code) LIKE ? OR LOWER(title) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like);
+  }
+
+  if (normalizedCategory) {
+    clauses.push("category_slug = ?");
+    values.push(normalizedCategory);
+  }
+
+  if (normalizedIsActive !== null) {
+    clauses.push("is_active = ?");
+    values.push(normalizedIsActive);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return query(
     `SELECT id, code, title, description, category_slug, duration_minutes, image, price, is_active, created_at
      FROM services
-     ORDER BY id ASC`
+     ${where}
+     ORDER BY id ASC`,
+    values
   );
 }
 
@@ -509,12 +617,52 @@ async function updateInventory(id, stockQty) {
   return query("SELECT id, name, stock_qty, in_stock FROM products WHERE id = ?", [id]);
 }
 
-async function listCustomers() {
-  return query("SELECT * FROM customers ORDER BY created_at DESC");
+async function listCustomers({ search, status } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedStatus = normalizeStatusValue(status);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(name) LIKE ? OR LOWER(COALESCE(phone, '')) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like);
+  }
+
+  if (normalizedStatus) {
+    clauses.push("LOWER(status) = ?");
+    values.push(normalizedStatus);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return query(`SELECT * FROM customers ${where} ORDER BY created_at DESC`, values);
 }
 
-async function listOrders() {
-  const rows = await query("SELECT * FROM orders ORDER BY created_at DESC");
+async function listOrders({ search, status, paymentStatus } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedStatus = normalizeStatusValue(status);
+  const normalizedPayment = normalizeStatusValue(paymentStatus);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(id) LIKE ? OR LOWER(COALESCE(user_id, '')) LIKE ? OR LOWER(COALESCE(date, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like);
+  }
+
+  if (normalizedStatus) {
+    clauses.push("LOWER(status) = ?");
+    values.push(normalizedStatus);
+  }
+
+  if (normalizedPayment) {
+    clauses.push("LOWER(COALESCE(payment_status, '')) = ?");
+    values.push(normalizedPayment);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = await query(`SELECT * FROM orders ${where} ORDER BY created_at DESC`, values);
   return rows.map((row) => ({
     ...row,
     items_list: parseList(row.items_list),
@@ -554,8 +702,25 @@ async function updateOrderStatus(id, status) {
   };
 }
 
-async function listVendors() {
-  return query("SELECT * FROM vendors ORDER BY created_at DESC");
+async function listVendors({ search, status } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedStatus = normalizeStatusValue(status);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(name) LIKE ? OR LOWER(COALESCE(contact_name, '')) LIKE ? OR LOWER(COALESCE(phone, '')) LIKE ? OR LOWER(COALESCE(email, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like, like);
+  }
+
+  if (normalizedStatus) {
+    clauses.push("LOWER(status) = ?");
+    values.push(normalizedStatus);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return query(`SELECT * FROM vendors ${where} ORDER BY created_at DESC`, values);
 }
 
 async function createVendor(payload) {
@@ -575,8 +740,31 @@ async function updateVendor(id, patch) {
   return query("SELECT * FROM vendors WHERE id = ?", [id]);
 }
 
-async function listPromotions() {
-  return query("SELECT * FROM promotions ORDER BY created_at DESC");
+async function listPromotions({ search, isActive, discountType } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+  const normalizedDiscountType = normalizeStatusValue(discountType);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(code) LIKE ? OR LOWER(title) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like);
+  }
+
+  if (normalizedIsActive !== null) {
+    clauses.push("is_active = ?");
+    values.push(normalizedIsActive);
+  }
+
+  if (normalizedDiscountType) {
+    clauses.push("LOWER(discount_type) = ?");
+    values.push(normalizedDiscountType);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return query(`SELECT * FROM promotions ${where} ORDER BY created_at DESC`, values);
 }
 
 async function createPromotion(payload) {

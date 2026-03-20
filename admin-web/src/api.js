@@ -12,8 +12,8 @@ const API = axios.create({
   },
 });
 
-export async function fetchModule(path) {
-  const response = await API.get(path);
+export async function fetchModule(path, params = {}) {
+  const response = await API.get(path, { params });
   return response?.data?.data || [];
 }
 

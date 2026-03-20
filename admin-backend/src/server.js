@@ -60,9 +60,9 @@ app.get("/health/dependencies", async (_req, res) => {
 
 app.use(requireAdminToken);
 
-app.get("/admin/products", async (_req, res) => {
+app.get("/admin/products", async (req, res) => {
   try {
-    return ok(res, await listProducts());
+    return ok(res, await listProducts(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch products: ${error.message}`);
   }
@@ -70,8 +70,7 @@ app.get("/admin/products", async (_req, res) => {
 
 app.get("/admin/product-categories", async (req, res) => {
   try {
-    const head = String(req.query?.head || "").trim();
-    return ok(res, await listProductCategories({ head }));
+    return ok(res, await listProductCategories(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch product categories: ${error.message}`);
   }
@@ -154,17 +153,17 @@ app.put("/admin/products/:id", async (req, res) => {
   }
 });
 
-app.get("/admin/inventory", async (_req, res) => {
+app.get("/admin/inventory", async (req, res) => {
   try {
-    return ok(res, await listInventory());
+    return ok(res, await listInventory(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch inventory: ${error.message}`);
   }
 });
 
-app.get("/admin/services", async (_req, res) => {
+app.get("/admin/services", async (req, res) => {
   try {
-    return ok(res, await listServices());
+    return ok(res, await listServices(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch services: ${error.message}`);
   }
@@ -224,17 +223,17 @@ app.patch("/admin/inventory/:id", async (req, res) => {
   }
 });
 
-app.get("/admin/customers", async (_req, res) => {
+app.get("/admin/customers", async (req, res) => {
   try {
-    return ok(res, await listCustomers());
+    return ok(res, await listCustomers(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch customers: ${error.message}`);
   }
 });
 
-app.get("/admin/orders", async (_req, res) => {
+app.get("/admin/orders", async (req, res) => {
   try {
-    return ok(res, await listOrders());
+    return ok(res, await listOrders(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch orders: ${error.message}`);
   }
@@ -256,9 +255,9 @@ app.patch("/admin/orders/:id/status", async (req, res) => {
   }
 });
 
-app.get("/admin/vendors", async (_req, res) => {
+app.get("/admin/vendors", async (req, res) => {
   try {
-    return ok(res, await listVendors());
+    return ok(res, await listVendors(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch vendors: ${error.message}`);
   }
@@ -285,9 +284,9 @@ app.put("/admin/vendors/:id", async (req, res) => {
   }
 });
 
-app.get("/admin/promotions", async (_req, res) => {
+app.get("/admin/promotions", async (req, res) => {
   try {
-    return ok(res, await listPromotions());
+    return ok(res, await listPromotions(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch promotions: ${error.message}`);
   }
