@@ -8,6 +8,42 @@ This repo now supports a split POC:
 
 ## Local Run
 
+### Option A) Full Split Stack With Docker (Recommended)
+
+Run all services separately but from one compose:
+
+- MySQL
+- App backend (`:4000`)
+- Admin backend (`:5001`)
+- Admin web (`:5174`)
+
+```bash
+docker-compose -f docker-compose.split-poc.yml up -d --build
+```
+
+Health checks:
+
+```bash
+curl http://127.0.0.1:4000/health
+curl http://127.0.0.1:5001/health
+curl -H "x-admin-token: admin123" http://127.0.0.1:5001/admin/products
+open http://127.0.0.1:5174
+```
+
+Stop:
+
+```bash
+docker-compose -f docker-compose.split-poc.yml down
+```
+
+Reset DB data:
+
+```bash
+docker-compose -f docker-compose.split-poc.yml down -v
+```
+
+### Option B) Hybrid Local (Existing)
+
 ### 1) Start MySQL + app backend containers
 
 ```bash
