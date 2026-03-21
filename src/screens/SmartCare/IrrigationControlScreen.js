@@ -1,5 +1,6 @@
-import React, { useContext } from "react";
+import React, { useContext, useEffect } from "react";
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -11,7 +12,13 @@ import {
 import { DeviceContext } from "../../context/DeviceContext";
 
 export default function IrrigationControlScreen() {
-  const { devices, loading, toggleDevice } = useContext(DeviceContext);
+  const { devices, loading, error, toggleDevice, loadDevices } = useContext(DeviceContext);
+
+  useEffect(() => {
+    if (!error) return;
+
+    Alert.alert("Irrigation", error);
+  }, [error]);
 
   const renderItem = ({ item }) => (
     <View style={styles.deviceCard}>
@@ -44,7 +51,14 @@ export default function IrrigationControlScreen() {
   if (devices.length === 0) {
     return (
       <View style={styles.center}>
-        <Text style={styles.empty}>No irrigation devices found.</Text>
+        <Text style={styles.empty}>
+          {error ? error : "No irrigation devices found."}
+        </Text>
+        {error ? (
+          <TouchableOpacity style={styles.retryButton} onPress={loadDevices}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     );
   }
@@ -77,4 +91,17 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "600", color: "#333" },
   moisture: { fontSize: 14, color: "#666", marginTop: 4 },
   lastSeen: { fontSize: 12, color: "#999", marginTop: 2 },
+  retryButton: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: "#fff",
+  },
+  retryButtonText: {
+    color: "#2f7d32",
+    fontWeight: "600",
+  },
 });

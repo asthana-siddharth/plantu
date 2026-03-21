@@ -8,13 +8,15 @@ import {
   Alert,
 } from "react-native";
 import { sendOtp } from "../../services/authService";
+import { getApiErrorMessage } from "../../services/api";
+import { normalizePhoneNumber } from "../../utils/phone";
 
 export default function LoginScreen({ navigation }) {
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const handleSendOTP = async () => {
-    const normalizedPhone = String(phone || "").trim();
-    if (!normalizedPhone || normalizedPhone.length < 10) {
+    const normalizedPhone = normalizePhoneNumber(phone);
+    if (!normalizedPhone || normalizedPhone.length !== 10) {
       Alert.alert("Error", "Please enter a valid phone number");
       return;
     }
@@ -25,7 +27,7 @@ export default function LoginScreen({ navigation }) {
       navigation.navigate("OTP", { phone: normalizedPhone });
       setLoading(false);
     } catch (error) {
-      Alert.alert("Error", error?.response?.data?.message || "Failed to send OTP");
+      Alert.alert("Error", getApiErrorMessage(error, "Failed to send OTP"));
       setLoading(false);
     }
   };

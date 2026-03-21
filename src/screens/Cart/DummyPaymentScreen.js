@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { createOrder } from "../../services/orderService";
 import { CartContext } from "../../context/CartContext";
+import { getApiErrorMessage } from "../../services/api";
 
 export default function DummyPaymentScreen({ route, navigation }) {
   const { dispatch } = React.useContext(CartContext);
@@ -21,7 +22,18 @@ export default function DummyPaymentScreen({ route, navigation }) {
 
       navigation.replace("OrderDetails", { orderId: order.id, order });
     } catch (error) {
-      Alert.alert("Payment Failed", error?.response?.data?.message || "Unable to confirm payment.");
+      const message = getApiErrorMessage(error, "Unable to confirm payment.");
+      if (message.toLowerCase().includes("complete profile")) {
+        Alert.alert("Payment Failed", message, [
+          {
+            text: "Go to Profile",
+            onPress: () => navigation.navigate("Profile"),
+          },
+          { text: "OK" },
+        ]);
+      } else {
+        Alert.alert("Payment Failed", message);
+      }
     } finally {
       setProcessing(false);
     }

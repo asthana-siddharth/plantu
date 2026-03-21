@@ -10,24 +10,33 @@ import {
 } from "react-native";
 import { CartContext } from "../../context/CartContext";
 import { getServices } from "../../services/serviceCatalogService";
+import { getApiErrorMessage } from "../../services/api";
 
 export default function GardenerBookingScreen({ navigation }) {
   const { dispatch } = useContext(CartContext);
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  async function loadServices(showPrompt = true) {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const response = await getServices();
+      setServices(response);
+    } catch (error) {
+      setServices([]);
+      const message = getApiErrorMessage(error, "Failed to load services.");
+      setLoadError(message);
+      if (showPrompt) {
+        Alert.alert("Services", message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function loadServices() {
-      try {
-        const response = await getServices();
-        setServices(response);
-      } catch (_error) {
-        setServices([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadServices();
   }, []);
 
@@ -63,6 +72,15 @@ export default function GardenerBookingScreen({ navigation }) {
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       <Text style={styles.heading}>Gardener Services</Text>
       <Text style={styles.caption}>Pick a service and add it to cart to purchase.</Text>
+
+      {loadError ? (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>{loadError}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadServices(false)}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {services.map((service) => (
         <View key={service.id} style={styles.card}>
@@ -101,6 +119,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#667",
     marginBottom: 14,
+  },
+  errorCard: {
+    borderWidth: 1,
+    borderColor: "#f3c9c9",
+    backgroundColor: "#fff4f4",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorText: {
+    color: "#8f2c2c",
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  retryButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#c64f4f",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#fff",
+  },
+  retryButtonText: {
+    color: "#8f2c2c",
+    fontWeight: "600",
+    fontSize: 12,
   },
   card: {
     padding: 14,

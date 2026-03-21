@@ -13,6 +13,7 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { getProducts } from "../../services/productService";
 import { CartContext } from "../../context/CartContext";
+import { getApiErrorMessage } from "../../services/api";
 
 const CATEGORY_META = {
   all: { name: "All", icon: "🧺" },
@@ -55,6 +56,7 @@ export default function ShopScreen() {
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const isSingleColumn = filteredProducts.length <= 1;
@@ -99,6 +101,7 @@ export default function ShopScreen() {
 
   useEffect(() => {
     const loadProducts = async () => {
+      setLoadError("");
       try {
         const response = await getProducts();
         setProducts(response);
@@ -106,6 +109,10 @@ export default function ShopScreen() {
       } catch (error) {
         setProducts([]);
         setFilteredProducts([]);
+
+        const message = getApiErrorMessage(error, "Failed to load products.");
+        setLoadError(message);
+        Alert.alert("Shop", message);
       } finally {
         setLoading(false);
       }
@@ -307,7 +314,7 @@ export default function ShopScreen() {
         contentContainerStyle={styles.productsList}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No products found</Text>
+            <Text style={styles.emptyText}>{loadError || "No products found"}</Text>
           </View>
         }
       />

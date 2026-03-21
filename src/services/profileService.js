@@ -1,8 +1,6 @@
 import API, { extractData } from "./api";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const PROFILE_CACHE_KEY = "plantu.profile.cache";
-const AUTH_USER_STORAGE_KEY = "plantu.auth.user";
+const PROFILE_REQUEST_TIMEOUT_MS = 4000;
 
 function computeProfileCompleted(profile = {}) {
   const required = [
@@ -20,73 +18,34 @@ function computeProfileCompleted(profile = {}) {
   return required.every((key) => String(profile[key] || "").trim().length > 0);
 }
 
-async function getCachedProfile() {
-  const [cachedProfileRaw, authUserRaw] = await Promise.all([
-    AsyncStorage.getItem(PROFILE_CACHE_KEY),
-    AsyncStorage.getItem(AUTH_USER_STORAGE_KEY),
-  ]);
-
-  const cachedProfile = cachedProfileRaw ? JSON.parse(cachedProfileRaw) : null;
-  const authUser = authUserRaw ? JSON.parse(authUserRaw) : null;
-
-  if (cachedProfile) {
-    return cachedProfile;
-  }
-
+function normalizeProfile(profile = {}) {
   return {
-    firstName: authUser?.firstName || "",
-    lastName: authUser?.lastName || "",
-    mobileNumber: authUser?.mobileNumber || authUser?.phone || "",
-    email: authUser?.email || "",
-    addressLine1: authUser?.addressLine1 || "",
-    addressLine2: authUser?.addressLine2 || "",
-    addressLine3: authUser?.addressLine3 || "",
-    country: authUser?.country || "",
-    stateName: authUser?.stateName || "",
-    city: authUser?.city || "",
-    pinCode: authUser?.pinCode || "",
-    profileCompleted: Boolean(authUser?.profileCompleted),
-    localFallback: true,
+    firstName: String(profile.firstName || "").trim(),
+    lastName: String(profile.lastName || "").trim(),
+    mobileNumber: String(profile.mobileNumber || profile.phone || "").trim(),
+    email: String(profile.email || "").trim(),
+    addressLine1: String(profile.addressLine1 || "").trim(),
+    addressLine2: String(profile.addressLine2 || "").trim(),
+    addressLine3: String(profile.addressLine3 || "").trim(),
+    country: String(profile.country || "").trim(),
+    stateName: String(profile.stateName || "").trim(),
+    city: String(profile.city || "").trim(),
+    pinCode: String(profile.pinCode || "").trim(),
+    profileCompleted: Boolean(profile.profileCompleted || computeProfileCompleted(profile)),
   };
 }
 
-async function cacheProfile(profile) {
-  await AsyncStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile));
-}
-
 export async function getMyProfile() {
-  try {
-    const response = await API.get("/me/profile");
-    const profile = extractData(response);
-    await cacheProfile(profile);
-    return profile;
-  } catch (error) {
-    if (error?.response) {
-      throw error;
-    }
-
-    return getCachedProfile();
-  }
+  const response = await API.get("/me/profile", { timeout: PROFILE_REQUEST_TIMEOUT_MS });
+  return normalizeProfile(extractData(response) || {});
 }
 
 export async function updateMyProfile(profilePayload) {
-  try {
-    const response = await API.put("/me/profile", profilePayload);
-    const profile = extractData(response);
-    await cacheProfile(profile);
-    return profile;
-  } catch (error) {
-    if (error?.response) {
-      throw error;
-    }
+  const payload = {
+    ...profilePayload,
+    profileCompleted: computeProfileCompleted(profilePayload),
+  };
 
-    const merged = {
-      ...profilePayload,
-      profileCompleted: computeProfileCompleted(profilePayload),
-      localFallback: true,
-    };
-
-    await cacheProfile(merged);
-    return merged;
-  }
+  const response = await API.put("/me/profile", payload, { timeout: PROFILE_REQUEST_TIMEOUT_MS });
+  return normalizeProfile(extractData(response) || {});
 }

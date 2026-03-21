@@ -1,121 +1,233 @@
-# My Mobile App
+# Plantu Mobile App
 
-## Overview
-This project is a mobile application built using React Native. It is designed to run on both Android and iOS platforms, providing a seamless user experience across devices.
+Plantu is a React Native mobile app with a Node.js backend for plant shopping, smart irrigation/device control, and order management.
 
-## Project Structure
-The project is organized into the following main directories:
+## Tech Stack
 
-- **android**: Contains all Android-specific code and resources.
-  - **app**: The main application module for Android.
-    - **src**: Source code for the Android app.
-      - **main**: Contains the main application code and resources.
-        - **java/com/mymobileapp**: Java source files for the app.
-        - **res**: Resources such as layouts, drawables, and values.
-      - **debug**: Contains the AndroidManifest for the debug build variant.
-    - **build.gradle**: Gradle build configuration for the Android app module.
-  - **build.gradle**: Top-level Gradle build configuration for the Android project.
+- Mobile: React Native (`0.71`), React Navigation, Axios
+- Backend: Node.js, Express
+- Data: MySQL primary (write), MySQL secondary (read)
+- Search/Read Model: Elasticsearch (orders)
+- Local Infra: Docker Compose
 
-- **ios**: Contains all iOS-specific code and resources.
-  - **mymobileapp**: The main application directory for iOS.
-    - **AppDelegate.h**: Header file for the AppDelegate class.
-    - **AppDelegate.m**: Implementation file for the AppDelegate class.
-    - **Info.plist**: Configuration settings for the iOS app.
-    - **main.m**: Entry point for the iOS app.
-  - **mymobileapp.xcodeproj**: Xcode project configuration.
-  - **mymobileappTests**: Contains unit tests for the iOS app.
+## Core Features
 
-- **src**: Contains shared React Native components and screens.
-  - **components**: Contains reusable components.
-    - **App.js**: Main App component.
-  - **screens**: Contains screen components.
-    - **HomeScreen.js**: Home screen component.
-  - **App.js**: Entry point for the React Native application.
+- Phone OTP based auth flow (dev OTP)
+- Product listing, search, and product detail
+- Cart management and checkout
+- Order creation and order history
+- IoT device state controls (on/off + device patching)
+- Service booking and profile flows in app navigation
 
-- **package.json**: Configuration file for npm, listing dependencies and scripts.
-- **index.js**: Entry point for the React Native application, registering the main component.
+## Monorepo Structure
 
-## Getting Started
-To get started with the project, follow these steps:
+```text
+.
+|- src/                         # React Native app source
+|  |- config/                  # API + constants + theme
+|  |- context/                 # Auth, cart, device state
+|  |- navigation/              # Root/auth/tab navigators
+|  |- screens/                 # Feature screens
+|  |- services/                # API service wrappers
+|- backend/
+|  |- src/                     # Express server + db/search modules
+|  |- mysql/                   # MySQL replication config/init scripts
+|  |- .env.example             # Backend environment template
+|- android/                    # Native Android project
+|- ios/                        # Native iOS project
+|- docker-compose.yml          # Local MySQL + Elasticsearch stack
+```
 
-1. Clone the repository:
-   ```
-   git clone <repository-url>
-   ```
+## Prerequisites
 
-2. Navigate to the project directory:
-   ```
-   cd my-mobile-app
-   ```
+- Node.js 18+ and npm
+- React Native Android/iOS toolchain
+- Java + Android SDK (for Android builds)
+- Xcode + CocoaPods (for iOS builds)
+- Docker Desktop (required for local MySQL + Elasticsearch stack)
 
-3. Install dependencies:
-   ```
-   npm install
-   ```
+## Setup
 
-4. Run the application:
-   - For Android:
-     ```
-     npx react-native run-android
-     ```
-   - For iOS:
-     ```
-     npx react-native run-ios
-     ```
+1. Install root dependencies:
 
-## Contributing
-Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.
+```bash
+npm install
+```
 
-## License
-This project is licensed under the MIT License. See the LICENSE file for details.
+2. Install backend dependencies:
 
-## Backend And Local Data Stack
+```bash
+cd backend
+npm install
+cd ..
+```
 
-The backend is in `backend/` (Node + Express) and uses:
+## Running The Mobile App
 
-- MySQL primary for writes (`localhost:3307`)
-- MySQL secondary for reads (`localhost:3308`)
-- Elasticsearch for order read APIs (`localhost:9200`)
+Start Metro from repo root:
 
-### Start local dependencies
+```bash
+npx react-native start
+```
 
-From project root:
+Run Android:
+
+```bash
+npx react-native run-android
+```
+
+Run iOS:
+
+```bash
+npx react-native run-ios
+```
+
+## Running Backend + Data Stack
+
+1. Start local dependencies from project root:
 
 ```bash
 docker compose up -d
 ```
 
-### Configure backend env
+2. Create backend env from template:
 
 ```bash
 cd backend
 cp .env.example .env
 ```
 
-The defaults in `.env.example` already match the Docker port mappings above.
-
-### Start backend
+3. Start backend:
 
 ```bash
 cd backend
-npm install
 npm run start
 ```
 
-Backend runs on `http://localhost:4000` by default.
+Backend default URL: `http://localhost:4000`
 
-### Dependency health check
+Note: `npm run start` must be run inside `backend/` because root `package.json` does not define a `start` script.
+
+## Backend Environment Variables
+
+Main variables from `backend/.env.example`:
+
+- `PORT`: backend port (default `4000`)
+- `DB_PRIMARY_*`: MySQL write node (default `127.0.0.1:3307`)
+- `DB_SECONDARY_*`: MySQL read node (default `127.0.0.1:3308`)
+- `ELASTIC_NODE`: Elasticsearch URL (default `http://127.0.0.1:9200`)
+- `ELASTIC_ORDER_INDEX`: order index name (default `orders`)
+
+## API Reference
+
+Base URL: `http://localhost:4000`
+
+Response envelope:
+
+- Success: `{ "success": true, "data": ... }`
+- Error: `{ "success": false, "message": "..." }`
+
+### Health
+
+- `GET /health`: service heartbeat and architecture mode
+- `GET /health/dependencies`: checks MySQL primary, MySQL secondary, Elasticsearch
+
+### Auth
+
+- `POST /auth/send-otp`
+  - Body: `{ "phone": "9999999999" }`
+- `POST /auth/resend-otp`
+  - Body: `{ "phone": "9999999999" }`
+- `POST /auth/verify-otp`
+  - Body: `{ "phone": "9999999999", "otp": "1111" }`
+
+### Products
+
+- `GET /products`
+  - Query: `category`, `search`
+- `GET /products/:id`
+
+### Devices
+
+- `GET /devices`
+- `POST /devices/:id/state`
+  - Body: `{ "on": true }`
+- `PATCH /devices/:id`
+  - Body: partial fields like `{ "name": "Pump", "isOn": false, "moisture": 42 }`
+
+### Orders
+
+- `GET /orders` (served from Elasticsearch)
+- `GET /orders/:id` (served from Elasticsearch)
+- `POST /orders`
+  - Body: `{ "items": [{ "quantity": 1, "product": { "name": "Aloe", "price": 199 } }] }`
+  - Write path: MySQL primary + Elasticsearch (dual write)
+
+## Architecture Notes
+
+- Writes use MySQL primary.
+- Reads use MySQL secondary where applicable (`products`, `devices`).
+- Orders are indexed in Elasticsearch and read from Elasticsearch.
+- On backend startup, if the order index is empty, orders are backfilled from MySQL primary.
+
+## Mobile API Connectivity
+
+`src/config/apiConfig.js` chooses host by platform:
+
+- iOS simulator: `localhost`
+- Android emulator: `10.0.2.2`
+
+This points the app to backend `:4000` by default.
+
+## Tests
+
+Run tests from repo root:
 
 ```bash
-curl http://localhost:4000/health/dependencies
+npm test
 ```
 
-Expected: `success: true` once MySQL primary/secondary and Elasticsearch are reachable.
-
-### Stop local dependencies
-
-From project root:
+Watch mode:
 
 ```bash
+npm run test:watch
+```
+
+Coverage:
+
+```bash
+npm run test:coverage
+```
+
+## Troubleshooting
+
+- Docker command not found:
+  - Install/start Docker Desktop, then run `docker compose up -d` again.
+- Backend start fails from repo root:
+  - Run from `backend/` using `cd backend && npm run start`.
+- Android app cannot call backend:
+  - Confirm backend runs on `4000` and emulator uses `10.0.2.2` mapping.
+- Dependency health fails:
+  - Check `curl http://localhost:4000/health/dependencies` and container status using `docker compose ps`.
+
+## Useful Commands
+
+From repo root:
+
+```bash
+docker compose up -d
 docker compose down
+npx react-native start
+npx react-native run-android
 ```
+
+From `backend/`:
+
+```bash
+npm run start
+npm run dev
+```
+
+## Deployment
+
+- AWS Free Tier deployment guide: `docs/AWS_FREE_TIER_DEPLOYMENT.md`

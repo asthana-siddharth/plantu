@@ -23,8 +23,11 @@ export function getApiBaseURLCandidates() {
 		candidates.push(...API_BASE_URL_CANDIDATES);
 	}
 
-	const host = API_HOSTS[Platform.OS] || "localhost";
-	candidates.push(`http://${host}:${API_PORT}`);
+	// Only add platform default host when no explicit candidate is provided.
+	if (candidates.length === 0) {
+		const host = API_HOSTS[Platform.OS] || "localhost";
+		candidates.push(`http://${host}:${API_PORT}`);
+	}
 
 	return [...new Set(candidates.map(normalizeURL).filter(Boolean))];
 }
@@ -33,4 +36,4 @@ export function getApiBaseURL() {
 	return getApiBaseURLCandidates()[0];
 }
 
-export const API_TIMEOUT_MS = 15000;
+export const API_TIMEOUT_MS = 4000;

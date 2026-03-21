@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { getOrders } from "../../services/orderService";
+import { getApiErrorMessage } from "../../services/api";
 
 export default function OrdersScreen({ navigation }) {
   const [orders, setOrders] = useState([]);
@@ -22,7 +23,7 @@ export default function OrdersScreen({ navigation }) {
         setOrders(response);
         setError("");
       } catch (err) {
-        setError("Failed to load orders");
+        setError(getApiErrorMessage(err, "Failed to load orders"));
       } finally {
         setLoading(false);
       }
@@ -140,6 +141,12 @@ export default function OrdersScreen({ navigation }) {
         <Text style={styles.orderCount}>
           {orders.length} {orders.length === 1 ? "order" : "orders"}
         </Text>
+        <TouchableOpacity
+          style={styles.dashboardButton}
+          onPress={() => navigation.navigate("MainTabs", { screen: "Home" })}
+        >
+          <Text style={styles.dashboardButtonText}>Go to Dashboard</Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -189,6 +196,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#999",
     marginTop: 4,
+  },
+  dashboardButton: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#fff",
+  },
+  dashboardButtonText: {
+    color: "#2f7d32",
+    fontWeight: "700",
+    fontSize: 13,
   },
   listContainer: {
     paddingHorizontal: 20,

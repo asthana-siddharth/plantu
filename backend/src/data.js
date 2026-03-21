@@ -8,7 +8,7 @@ const products = [
     image: "plant",
     description: "Beautiful indoor plant with large leaves",
     inStock: true,
-    stockQty: 30,
+    stockQty: 10,
   },
   {
     id: 2,
@@ -19,7 +19,7 @@ const products = [
     image: "plant",
     description: "Low maintenance, air-purifying plant",
     inStock: true,
-    stockQty: 20,
+    stockQty: 10,
   },
   {
     id: 3,
@@ -30,7 +30,7 @@ const products = [
     image: "pot",
     description: "Elegant ceramic pot with drainage",
     inStock: true,
-    stockQty: 40,
+    stockQty: 10,
   },
   {
     id: 4,
@@ -41,7 +41,7 @@ const products = [
     image: "seed",
     description: "Hybrid tomato seeds, high yield",
     inStock: true,
-    stockQty: 100,
+    stockQty: 10,
   },
   {
     id: 5,
@@ -52,7 +52,7 @@ const products = [
     image: "tool",
     description: "Professional stainless steel pruner",
     inStock: true,
-    stockQty: 18,
+    stockQty: 10,
   },
   {
     id: 6,
@@ -62,8 +62,8 @@ const products = [
     rating: 4.7,
     image: "plant",
     description: "Trailing plant, perfect for hanging",
-    inStock: false,
-    stockQty: 0,
+    inStock: true,
+    stockQty: 10,
   },
 ];
 

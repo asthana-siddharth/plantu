@@ -8,8 +8,10 @@ export const getDevices = async () => {
 };
 
 // toggle a device on/off
-export const setDeviceState = (id, isOn) =>
-  API.post(`/devices/${id}/state`, { on: isOn });
+export const setDeviceState = async (id, isOn) => {
+  await API.post(`/devices/${id}/state`, { on: isOn });
+  return { id, isOn };
+};
 
 // update watering schedule / moisture threshold etc.
 export const updateDevice = async (id, data) => {

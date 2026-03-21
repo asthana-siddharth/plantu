@@ -1,5 +1,6 @@
 import React, { useReducer, useEffect } from "react";
 import * as deviceService from "../services/deviceService";
+import { getApiErrorMessage } from "../services/api";
 
 export const DeviceContext = React.createContext();
 
@@ -38,7 +39,7 @@ export function DeviceProvider({ children }) {
       const devices = await deviceService.getDevices();
       dispatch({ type: "LOAD_SUCCESS", payload: devices });
     } catch (err) {
-      dispatch({ type: "LOAD_FAILURE", payload: err.message });
+      dispatch({ type: "LOAD_FAILURE", payload: getApiErrorMessage(err, "Unable to load irrigation devices.") });
     }
   };
 

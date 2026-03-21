@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { AuthContext } from "../../context/AuthContext";
 import { resendOtp, verifyOtp } from "../../services/authService";
+import { getApiErrorMessage } from "../../services/api";
 
 export default function OTPScreen({ route, navigation }) {
   const [otp, setOtp] = useState("");
@@ -40,7 +41,7 @@ export default function OTPScreen({ route, navigation }) {
       });
       setLoading(false);
     } catch (error) {
-      Alert.alert("Error", "Invalid OTP. Use 1111 for now.");
+      Alert.alert("Error", getApiErrorMessage(error, "Invalid OTP or verification failed."));
       setLoading(false);
     }
   };
@@ -52,7 +53,7 @@ export default function OTPScreen({ route, navigation }) {
       await resendOtp(phone);
       Alert.alert("Success", "OTP sent to " + phone);
     } catch (error) {
-      Alert.alert("Error", "Failed to resend OTP");
+      Alert.alert("Error", getApiErrorMessage(error, "Failed to resend OTP"));
     }
   };
 

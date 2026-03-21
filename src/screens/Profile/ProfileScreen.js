@@ -1,4 +1,5 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useContext, useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
   Alert,
@@ -13,6 +14,7 @@ import {
 } from "react-native";
 import { AuthContext } from "../../context/AuthContext";
 import { getMyProfile, updateMyProfile } from "../../services/profileService";
+import { getApiErrorMessage } from "../../services/api";
 
 const LOCATION_DATA = {
   India: {
@@ -100,42 +102,37 @@ export default function ProfileScreen({ route, navigation }) {
 
   const forceComplete = Boolean(route.params?.requireCompletion) || !state.user?.profileCompleted;
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadProfile() {
-      try {
-        const profile = await getMyProfile();
-        if (!isMounted) return;
-
-        setForm({
-          firstName: profile.firstName || "",
-          lastName: profile.lastName || "",
-          mobileNumber: profile.mobileNumber || profile.phone || "",
-          email: profile.email || "",
-          addressLine1: profile.addressLine1 || "",
-          addressLine2: profile.addressLine2 || "",
-          addressLine3: profile.addressLine3 || "",
-          country: profile.country || "",
-          stateName: profile.stateName || "",
-          city: profile.city || "",
-          pinCode: profile.pinCode || "",
-        });
-      } catch (_error) {
-        Alert.alert("Profile", "Unable to load profile data.");
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+  const loadProfile = useCallback(async (showError = false) => {
+    setLoading(true);
+    try {
+      const profile = await getMyProfile();
+      setForm({
+        firstName: profile.firstName || "",
+        lastName: profile.lastName || "",
+        mobileNumber: profile.mobileNumber || profile.phone || "",
+        email: profile.email || "",
+        addressLine1: profile.addressLine1 || "",
+        addressLine2: profile.addressLine2 || "",
+        addressLine3: profile.addressLine3 || "",
+        country: profile.country || "",
+        stateName: profile.stateName || "",
+        city: profile.city || "",
+        pinCode: profile.pinCode || "",
+      });
+    } catch (error) {
+      if (showError) {
+        Alert.alert("Profile", getApiErrorMessage(error, "Unable to load profile data."));
       }
+    } finally {
+      setLoading(false);
     }
-
-    loadProfile();
-
-    return () => {
-      isMounted = false;
-    };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile(true);
+    }, [loadProfile])
+  );
 
   const countryOptions = useMemo(() => Object.keys(LOCATION_DATA), []);
   const stateOptions = useMemo(() => {
@@ -206,7 +203,7 @@ export default function ProfileScreen({ route, navigation }) {
         },
       ]);
     } catch (error) {
-      Alert.alert("Profile", error?.response?.data?.message || "Failed to save profile");
+      Alert.alert("Profile", getApiErrorMessage(error, "Failed to save profile"));
     } finally {
       setSaving(false);
     }

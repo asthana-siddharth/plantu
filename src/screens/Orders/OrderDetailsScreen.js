@@ -30,11 +30,13 @@ export default function OrderDetailsScreen({ route, navigation }) {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");
 
+  const resolvedOrderId = orderId || prefetchedOrder?.id;
+
   useEffect(() => {
     let isMounted = true;
 
     async function loadOrder() {
-      if (!orderId) {
+      if (!resolvedOrderId) {
         setError("Order not found");
         setLoading(false);
         return;
@@ -42,7 +44,7 @@ export default function OrderDetailsScreen({ route, navigation }) {
 
       setLoading(true);
       try {
-        const response = await getOrderById(orderId);
+        const response = await getOrderById(resolvedOrderId);
         if (isMounted) {
           setOrder(response);
           setError("");
@@ -65,7 +67,43 @@ export default function OrderDetailsScreen({ route, navigation }) {
     return () => {
       isMounted = false;
     };
-  }, [orderId, prefetchedOrder]);
+  }, [resolvedOrderId, prefetchedOrder]);
+
+  useEffect(() => {
+    if (!resolvedOrderId) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const poll = setInterval(async () => {
+      try {
+        const latest = await getOrderById(resolvedOrderId);
+        if (!isMounted || !latest) {
+          return;
+        }
+
+        setOrder((prev) => {
+          if (!prev) {
+            return latest;
+          }
+
+          if (prev.status !== latest.status || prev.payment_status !== latest.payment_status) {
+            return latest;
+          }
+
+          return prev;
+        });
+      } catch (_error) {
+        // Keep UI stable on transient poll failures.
+      }
+    }, 1000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(poll);
+    };
+  }, [resolvedOrderId]);
 
   const lineItems = useMemo(() => {
     if (Array.isArray(order?.order_items) && order.order_items.length) {
@@ -164,6 +202,12 @@ export default function OrderDetailsScreen({ route, navigation }) {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>{error || "Order unavailable"}</Text>
+        <TouchableOpacity
+          style={[styles.primaryButton, styles.dashboardButton]}
+          onPress={() => navigation.navigate("MainTabs", { screen: "Home" })}
+        >
+          <Text style={styles.dashboardButtonText}>Go to Dashboard</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate("OrderSummary")}>
           <Text style={styles.primaryButtonText}>Back to Order Summary</Text>
         </TouchableOpacity>
@@ -243,6 +287,13 @@ export default function OrderDetailsScreen({ route, navigation }) {
         <Text style={styles.primaryButtonText}>Go to Order Summary</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        style={[styles.primaryButton, styles.dashboardButton]}
+        onPress={() => navigation.navigate("MainTabs", { screen: "Home" })}
+      >
+        <Text style={styles.dashboardButtonText}>Go to Dashboard</Text>
+      </TouchableOpacity>
+
       {canCancelOrder && (
         <TouchableOpacity
           style={[styles.primaryButton, styles.cancelButton]}
@@ -293,6 +344,16 @@ const styles = StyleSheet.create({
   cancelButton: {
     backgroundColor: "#C62828",
     marginTop: 10,
+  },
+  dashboardButton: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#4CAF50",
+  },
+  dashboardButtonText: {
+    color: "#2f7d32",
+    fontWeight: "700",
+    fontSize: 15,
   },
   primaryButtonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   errorText: { color: "#d32f2f", marginBottom: 12 },
