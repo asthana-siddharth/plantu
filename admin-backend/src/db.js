@@ -170,6 +170,11 @@ async function initSchema() {
     await query("ALTER TABLE products ADD COLUMN onboarded_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP");
   }
 
+  // Older databases may not have this column but products APIs now select it.
+  if (!(await columnExists("products", "created_at"))) {
+    await query("ALTER TABLE products ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
+  }
+
   await query(`
     CREATE TABLE IF NOT EXISTS product_categories (
       id INT AUTO_INCREMENT PRIMARY KEY,
