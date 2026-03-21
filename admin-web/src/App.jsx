@@ -259,7 +259,7 @@ function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll,
 
   return (
     <div className="tableWrap">
-      <table>
+      <table className="productsTable">
         <thead>
           <tr>
             <th>
@@ -296,12 +296,16 @@ function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll,
                 <td>{pretty(row.name)}</td>
                 <td>{pretty(row.category)}</td>
                 <td>{formatMoney(row.price)}</td>
-                <td>{isActive ? "Active" : "Inactive"}</td>
+                <td>
+                  <span className={isActive ? "statusPill isActive" : "statusPill isInactive"}>
+                    {isActive ? "Active" : "Inactive"}
+                  </span>
+                </td>
                 <td>{pretty(row.vendor_id)}</td>
                 <td>{formatDateTime(row.onboarded_at || row.created_at)}</td>
                 <td>
                   {imageUrl ? (
-                    <a href={imageUrl} target="_blank" rel="noreferrer">
+                    <a className="productImageLink" href={imageUrl} target="_blank" rel="noreferrer">
                       View
                     </a>
                   ) : (
@@ -310,7 +314,7 @@ function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll,
                 </td>
                 <td>{pretty(row.description)}</td>
                 <td>
-                  <button type="button" className="dangerBtn" onClick={() => onDeleteProduct(row)}>
+                  <button type="button" className="dangerBtn compactDanger" onClick={() => onDeleteProduct(row)}>
                     Delete
                   </button>
                 </td>
@@ -427,6 +431,22 @@ export default function App() {
     if (inventoryEditCategoryFilter === "all") return rows;
     return rows.filter((row) => String(row.category || "") === inventoryEditCategoryFilter);
   }, [rows, inventoryEditCategoryFilter]);
+  const productCommandStats = useMemo(() => {
+    if (active.key !== "products") {
+      return { total: 0, onPage: 0, activeOnPage: 0, inactiveOnPage: 0 };
+    }
+
+    const visibleRows = Array.isArray(rows) ? rows : [];
+    const activeOnPage = visibleRows.filter((row) => Number(row.in_stock) === 1).length;
+    const inactiveOnPage = Math.max(0, visibleRows.length - activeOnPage);
+
+    return {
+      total: Number(productTotal || 0),
+      onPage: visibleRows.length,
+      activeOnPage,
+      inactiveOnPage,
+    };
+  }, [active.key, rows, productTotal]);
 
   async function loadCategories() {
     try {
@@ -452,13 +472,13 @@ export default function App() {
     switch (active.key) {
       case "products":
         return [
-          { value: "all", label: "Both" },
+          { value: "all", label: "All Products" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
       case "services":
         return [
-          { value: "all", label: "Both" },
+          { value: "all", label: "All Status" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
@@ -477,7 +497,7 @@ export default function App() {
       case "customers":
       case "vendors":
         return [
-          { value: "all", label: "Both" },
+          { value: "all", label: "All Status" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
@@ -485,14 +505,14 @@ export default function App() {
         return [{ value: "all", label: "All Status" }, ...ORDER_STATUSES.map((status) => ({ value: status, label: status }))];
       case "promotions":
         return [
-          { value: "all", label: "Both" },
+          { value: "all", label: "All Status" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
       case "roles":
       case "users":
         return [
-          { value: "all", label: "Both" },
+          { value: "all", label: "All Status" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
@@ -909,11 +929,6 @@ export default function App() {
       return;
     }
 
-    if (bulkProductStatus === "both") {
-      setError("Choose Active or Inactive for bulk update");
-      return;
-    }
-
     try {
       await patchBulkProductStatus(selectedProductIds, bulkProductStatus === "active");
       setSelectedProductIds([]);
@@ -1096,8 +1111,8 @@ export default function App() {
           </div>
         </div>
 
-        <h3 className="sectionHeading">Search & Filters</h3>
-        <form className="inlineForm filterForm" onSubmit={handleApplySearchFilters}>
+        <h3 className="sectionHeading">{active.key === "products" ? "Command Center" : "Search & Filters"}</h3>
+        <form className={active.key === "products" ? "inlineForm filterForm commandCenterToolbar" : "inlineForm filterForm"} onSubmit={handleApplySearchFilters}>
           <input
             placeholder={activeFilterConfig.placeholder}
             value={searchTerm}
@@ -1188,21 +1203,42 @@ export default function App() {
 
         {active.key === "products" && (
           <>
-          <h3 className="sectionHeading">Product Status Actions</h3>
-          <form className="inlineForm" onSubmit={handleBulkProductPatch}>
-            <select
-              value={bulkProductStatus}
-              onChange={(e) => setBulkProductStatus(e.target.value)}
-            >
-              <option value="both">Both</option>
-              <option value="active">Set Active</option>
-              <option value="inactive">Set Inactive</option>
-            </select>
-            <button type="submit">Apply To Selected ({selectedProductIds.length})</button>
-          </form>
+          <div className="commandCenterStats">
+            <div className="kpiCard">
+              <p>Total Records</p>
+              <strong>{productCommandStats.total}</strong>
+            </div>
+            <div className="kpiCard">
+              <p>Rows On Page</p>
+              <strong>{productCommandStats.onPage}</strong>
+            </div>
+            <div className="kpiCard">
+              <p>Active On Page</p>
+              <strong>{productCommandStats.activeOnPage}</strong>
+            </div>
+            <div className="kpiCard">
+              <p>Inactive On Page</p>
+              <strong>{productCommandStats.inactiveOnPage}</strong>
+            </div>
+          </div>
+
+          <div className="commandCenterPanel">
+            <h3 className="sectionHeading">Product Status Actions</h3>
+            <form className="inlineForm commandCenterActions" onSubmit={handleBulkProductPatch}>
+              <select
+                value={bulkProductStatus}
+                onChange={(e) => setBulkProductStatus(e.target.value)}
+              >
+                <option value="active">Set Active</option>
+                <option value="inactive">Set Inactive</option>
+              </select>
+              <button type="submit">Apply To Selected ({selectedProductIds.length})</button>
+              <button type="button" onClick={() => setShowProductModal(true)}>+ Add Product</button>
+            </form>
+          </div>
 
           <div className="inlineForm">
-            <button type="button" onClick={() => setShowProductModal(true)}>Add Product (Popup)</button>
+            <p className="muted">Use bulk status updates from the command bar and delete from row actions.</p>
           </div>
 
           {productUploadState.message ? <p className="muted">{productUploadState.message}</p> : null}
