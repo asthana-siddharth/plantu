@@ -1,14 +1,22 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  createAdminUser,
   createCustomer,
   createService,
+  createRole,
   createProduct,
   createProductCategory,
+  fetchAuthMe,
   fetchModule,
   fetchProductCategories,
+  loginAdmin,
+  logoutAdmin,
+  patchBulkProductStatus,
   patchBulkOrderStatus,
   patchInventory,
   patchOrderStatus,
+  getStoredAdminToken,
+  uploadProductImage,
   upsertTaxRule,
 } from "./api";
 
@@ -22,6 +30,8 @@ const modules = [
   { key: "vendors", label: "Vendors", path: "/admin/vendors" },
   { key: "promotions", label: "Promotions", path: "/admin/promotions" },
   { key: "taxControl", label: "Tax Control", path: "/admin/tax-rules" },
+  { key: "roles", label: "Roles", path: "/admin/roles" },
+  { key: "users", label: "Users", path: "/admin/users" },
 ];
 
 const ORDER_STATUSES = [
@@ -35,7 +45,7 @@ const ORDER_STATUSES = [
 ];
 
 const MODULE_FILTER_MAP = {
-  products: { placeholder: "Search by product id, name, category, sku", param: "category" },
+  products: { placeholder: "Search by product id, name, category, onboarded by", param: "isActive" },
   services: { placeholder: "Search by code, title, description", param: "isActive" },
   categoryMaster: { placeholder: "Search by category name or slug", param: "head" },
   inventory: { placeholder: "Search by product id, name, category, sku", param: "stockStatus" },
@@ -44,6 +54,8 @@ const MODULE_FILTER_MAP = {
   vendors: { placeholder: "Search by name, contact, phone, email", param: "status" },
   promotions: { placeholder: "Search by code or title", param: "isActive" },
   taxControl: { placeholder: "Search by scope or description", param: "scope" },
+  roles: { placeholder: "Search by role name or description", param: "isActive" },
+  users: { placeholder: "Search by username, display name, role", param: "isActive" },
 };
 
 function pretty(value) {
@@ -232,7 +244,84 @@ function OrdersTable({ rows, selectedOrderIds, onToggleOrder, onToggleAll }) {
   );
 }
 
+function formatDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll }) {
+  if (!rows.length) return <p className="muted">No rows found</p>;
+
+  const allSelected = rows.length > 0 && rows.every((row) => selectedProductIds.includes(String(row.id)));
+
+  return (
+    <div className="tableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th>
+              <input type="checkbox" checked={allSelected} onChange={onToggleAll} />
+            </th>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Category</th>
+            <th>Price</th>
+            <th>Status</th>
+            <th>Onboarded By</th>
+            <th>Onboarded At</th>
+            <th>Image</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const productId = String(row.id);
+            const isActive = Number(row.in_stock) === 1;
+            const imageUrl = String(row.image || "").trim();
+
+            return (
+              <tr key={productId}>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selectedProductIds.includes(productId)}
+                    onChange={() => onToggleProduct(productId)}
+                  />
+                </td>
+                <td>{pretty(row.id)}</td>
+                <td>{pretty(row.name)}</td>
+                <td>{pretty(row.category)}</td>
+                <td>{formatMoney(row.price)}</td>
+                <td>{isActive ? "Active" : "Inactive"}</td>
+                <td>{pretty(row.vendor_id)}</td>
+                <td>{formatDateTime(row.onboarded_at || row.created_at)}</td>
+                <td>
+                  {imageUrl ? (
+                    <a href={imageUrl} target="_blank" rel="noreferrer">
+                      View
+                    </a>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+                <td>{pretty(row.description)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function App() {
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authUser, setAuthUser] = useState(null);
+  const [loginDraft, setLoginDraft] = useState({ username: "", password: "" });
+  const [authError, setAuthError] = useState("");
+
   const [active, setActive] = useState(modules[0]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -245,6 +334,17 @@ export default function App() {
   const [inventoryEditCategoryFilter, setInventoryEditCategoryFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterValue, setFilterValue] = useState("all");
+  const [productPage, setProductPage] = useState(1);
+  const [productLimit, setProductLimit] = useState(20);
+  const [productTotal, setProductTotal] = useState(0);
+  const [productTotalPages, setProductTotalPages] = useState(1);
+  const [selectedProductIds, setSelectedProductIds] = useState([]);
+  const [bulkProductStatus, setBulkProductStatus] = useState("active");
+  const [productUploadState, setProductUploadState] = useState({
+    uploading: false,
+    message: "",
+    error: "",
+  });
   const [categories, setCategories] = useState([]);
   const [categoryName, setCategoryName] = useState("");
   const [categoryHead, setCategoryHead] = useState("item");
@@ -255,18 +355,25 @@ export default function App() {
     status: "active",
   });
   const [productDraft, setProductDraft] = useState({
-    id: "",
     name: "",
     category: "",
     price: "",
-    rating: "4.5",
-    image: "plant",
+    image: "",
     description: "",
-    stockQty: "10",
-    inStock: true,
   });
 
   const activeLabel = useMemo(() => active.label, [active]);
+  const visibleModules = useMemo(() => {
+    if (!authUser) {
+      return modules;
+    }
+
+    if (String(authUser.roleName || "").trim().toLowerCase() === "operations") {
+      return modules.filter((moduleObj) => moduleObj.key !== "roles");
+    }
+
+    return modules;
+  }, [authUser]);
   const itemCategories = useMemo(
     () => categories.filter((cat) => cat.head === "item" && Number(cat.is_active) === 1),
     [categories]
@@ -294,6 +401,20 @@ export default function App() {
     isActive: true,
     description: "",
   });
+  const [roleDraft, setRoleDraft] = useState({
+    name: "",
+    description: "",
+    permissions: "products,services,inventory,orders,customers,taxControl",
+    isActive: true,
+  });
+  const [userDraft, setUserDraft] = useState({
+    username: "",
+    password: "",
+    displayName: "",
+    roleId: "",
+    isActive: true,
+  });
+  const [rolesLookup, setRolesLookup] = useState([]);
   const inventoryFilteredRows = useMemo(() => {
     if (inventoryEditCategoryFilter === "all") return rows;
     return rows.filter((row) => String(row.category || "") === inventoryEditCategoryFilter);
@@ -309,11 +430,24 @@ export default function App() {
     }
   }
 
+  async function loadRolesLookup() {
+    try {
+      const data = await fetchModule("/admin/roles", {});
+      setRolesLookup(Array.isArray(data) ? data : []);
+    } catch (_err) {
+      setRolesLookup([]);
+    }
+  }
+
   const activeFilterConfig = MODULE_FILTER_MAP[active.key] || { placeholder: "Search", param: "" };
   const activeFilterOptions = useMemo(() => {
     switch (active.key) {
       case "products":
-        return [{ value: "all", label: "All Categories" }, ...itemCategories.map((cat) => ({ value: cat.slug, label: cat.name }))];
+        return [
+          { value: "all", label: "All Products" },
+          { value: "active", label: "Active" },
+          { value: "inactive", label: "Inactive" },
+        ];
       case "services":
         return [
           { value: "all", label: "All Status" },
@@ -347,6 +481,13 @@ export default function App() {
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
+      case "roles":
+      case "users":
+        return [
+          { value: "all", label: "All Status" },
+          { value: "active", label: "Active" },
+          { value: "inactive", label: "Inactive" },
+        ];
       case "taxControl":
         return [
           { value: "all", label: "All Scopes" },
@@ -362,44 +503,151 @@ export default function App() {
     }
   }, [active.key, itemCategories, serviceCategories]);
 
-  function buildQueryParams() {
+  function buildQueryParams(moduleObj = active, overrides = {}) {
+    const moduleFilterConfig = MODULE_FILTER_MAP[moduleObj.key] || { param: "" };
     const params = {};
     if (searchTerm.trim()) {
       params.search = searchTerm.trim();
     }
 
-    if (filterValue !== "all" && activeFilterConfig.param) {
-      params[activeFilterConfig.param] = filterValue;
+    if (filterValue !== "all" && moduleFilterConfig.param) {
+      params[moduleFilterConfig.param] = filterValue;
     }
 
-    return params;
+    if (moduleObj.key === "products") {
+      params.page = productPage;
+      params.limit = productLimit;
+    }
+
+    return { ...params, ...overrides };
   }
 
   async function loadModule(moduleObj, params = {}) {
+    const finalParams = { ...params };
+    if (moduleObj.key === "products") {
+      if (!finalParams.page) finalParams.page = productPage;
+      if (!finalParams.limit) finalParams.limit = productLimit;
+    }
+
     setLoading(true);
     setError("");
     try {
-      const data = await fetchModule(moduleObj.path, params);
-      setRows(data);
+      const data = await fetchModule(moduleObj.path, finalParams);
+
+      if (moduleObj.key === "products") {
+        const payload = data && typeof data === "object" ? data : {};
+        const nextRows = Array.isArray(payload.rows) ? payload.rows : [];
+        setRows(nextRows);
+        setProductTotal(Number(payload.total || 0));
+        setProductPage(Number(payload.page || finalParams.page || 1));
+        setProductLimit(Number(payload.limit || finalParams.limit || productLimit));
+        setProductTotalPages(Math.max(1, Number(payload.totalPages || 1)));
+      } else {
+        setRows(Array.isArray(data) ? data : []);
+      }
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Request failed");
       setRows([]);
+      if (moduleObj.key === "products") {
+        setProductTotal(0);
+        setProductTotalPages(1);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function bootstrapAuth() {
+      const token = getStoredAdminToken();
+      if (!token) {
+        if (isMounted) setAuthChecking(false);
+        return;
+      }
+
+      try {
+        const me = await fetchAuthMe();
+        if (isMounted) {
+          setAuthUser(me);
+          setAuthError("");
+        }
+      } catch (_error) {
+        if (isMounted) {
+          setAuthUser(null);
+          setAuthError("Session expired. Please login again.");
+        }
+      } finally {
+        if (isMounted) {
+          setAuthChecking(false);
+        }
+      }
+    }
+
+    bootstrapAuth();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      return;
+    }
+
+    if (!visibleModules.some((moduleObj) => moduleObj.key === active.key)) {
+      setActive(visibleModules[0] || modules[0]);
+      return;
+    }
+
     setSearchTerm("");
     setFilterValue("all");
     setSelectedOrderIds([]);
+    setSelectedProductIds([]);
     setInventoryEditCategoryFilter("all");
+    if (active.key === "products") {
+      setProductPage(1);
+      setProductLimit(20);
+      loadModule(active, { page: 1, limit: 20 });
+      return;
+    }
+
     loadModule(active, {});
-  }, [active]);
+  }, [active, authUser, visibleModules]);
 
   useEffect(() => {
+    if (!authUser) {
+      return;
+    }
+
     loadCategories();
-  }, []);
+    loadRolesLookup();
+  }, [authUser]);
+
+  async function handleLogin(event) {
+    event.preventDefault();
+    if (!loginDraft.username.trim() || !loginDraft.password.trim()) {
+      setAuthError("Username and password are required.");
+      return;
+    }
+
+    setAuthError("");
+    try {
+      const payload = await loginAdmin(loginDraft.username.trim(), loginDraft.password);
+      setAuthUser(payload?.user || null);
+      setLoginDraft({ username: "", password: "" });
+      await Promise.all([loadModule(active, buildQueryParams()), loadRolesLookup()]);
+    } catch (err) {
+      setAuthError(err?.response?.data?.message || err.message || "Login failed");
+    }
+  }
+
+  async function handleLogout() {
+    await logoutAdmin();
+    setAuthUser(null);
+    setRows([]);
+  }
 
   async function handleOrderPatch(event) {
     event.preventDefault();
@@ -471,6 +719,12 @@ export default function App() {
 
   async function handleApplySearchFilters(event) {
     event.preventDefault();
+    if (active.key === "products") {
+      setSelectedProductIds([]);
+      setProductPage(1);
+      await loadModule(active, buildQueryParams(active, { page: 1 }));
+      return;
+    }
     await loadModule(active, buildQueryParams());
   }
 
@@ -478,6 +732,12 @@ export default function App() {
     setSearchTerm("");
     setFilterValue("all");
     setSelectedOrderIds([]);
+    setSelectedProductIds([]);
+    if (active.key === "products") {
+      setProductPage(1);
+      await loadModule(active, { page: 1, limit: productLimit });
+      return;
+    }
     await loadModule(active, {});
   }
 
@@ -516,38 +776,141 @@ export default function App() {
   async function handleCreateProduct(event) {
     event.preventDefault();
 
-    const parsedId = Number(productDraft.id);
     const parsedPrice = Number(productDraft.price);
-    const parsedRating = Number(productDraft.rating);
-    const parsedStockQty = Number(productDraft.stockQty);
 
-    if (!parsedId || !productDraft.name.trim() || !productDraft.category.trim()) return;
-    if (Number.isNaN(parsedPrice) || Number.isNaN(parsedRating) || Number.isNaN(parsedStockQty)) return;
+    if (!productDraft.name.trim() || !productDraft.category.trim()) return;
+    if (Number.isNaN(parsedPrice)) return;
 
     try {
       await createProduct({
-        id: parsedId,
         name: productDraft.name.trim(),
         category: productDraft.category.trim(),
         price: parsedPrice,
-        rating: parsedRating,
-        image: productDraft.image.trim() || "plant",
+        image: productDraft.image.trim(),
         description: productDraft.description.trim() || "",
-        stockQty: parsedStockQty,
-        inStock: productDraft.inStock,
+        isActive: true,
       });
-      setProductDraft((prev) => ({
-        ...prev,
-        id: "",
+      setProductDraft({
         name: "",
+        category: "",
         price: "",
+        image: "",
         description: "",
-        stockQty: "10",
-      }));
+      });
+      setProductUploadState({ uploading: false, message: "", error: "" });
       await loadModule(active, buildQueryParams());
     } catch (err) {
       setError(err?.response?.data?.message || err.message || "Create product failed");
     }
+  }
+
+  async function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || "");
+        const base64 = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleProductImageChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!String(file.type || "").toLowerCase().startsWith("image/")) {
+      setProductUploadState({ uploading: false, message: "", error: "Please select a valid image file." });
+      return;
+    }
+
+    if (file.size > 100 * 1024) {
+      setProductUploadState({ uploading: false, message: "", error: "Image must be <= 100KB." });
+      return;
+    }
+
+    setProductUploadState({ uploading: true, message: "Uploading image...", error: "" });
+
+    try {
+      const dataBase64 = await fileToBase64(file);
+      const uploadResult = await uploadProductImage({
+        fileName: file.name,
+        mimeType: file.type,
+        dataBase64,
+      });
+
+      setProductDraft((prev) => ({ ...prev, image: String(uploadResult?.imageUrl || "") }));
+      setProductUploadState({
+        uploading: false,
+        message: `Uploaded (${Math.round(Number(uploadResult?.sizeBytes || file.size) / 1024)}KB)`,
+        error: "",
+      });
+    } catch (err) {
+      setProductUploadState({
+        uploading: false,
+        message: "",
+        error: err?.response?.data?.message || err.message || "Image upload failed",
+      });
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function toggleProductSelection(productId) {
+    setSelectedProductIds((prev) =>
+      prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
+    );
+  }
+
+  function toggleSelectAllProducts() {
+    if (!rows.length) {
+      setSelectedProductIds([]);
+      return;
+    }
+
+    const visibleIds = rows.map((row) => String(row.id));
+    const allSelected = visibleIds.every((id) => selectedProductIds.includes(id));
+    setSelectedProductIds(allSelected ? [] : visibleIds);
+  }
+
+  async function handleBulkProductPatch(event) {
+    event.preventDefault();
+    if (!selectedProductIds.length) {
+      setError("Select at least one product");
+      return;
+    }
+
+    try {
+      await patchBulkProductStatus(selectedProductIds, bulkProductStatus === "active");
+      setSelectedProductIds([]);
+      setError("");
+      await loadModule(active, buildQueryParams());
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Bulk update failed");
+    }
+  }
+
+  async function handleProductPageChange(nextPage) {
+    const safePage = Math.max(1, Math.min(nextPage, productTotalPages));
+    if (safePage === productPage) {
+      return;
+    }
+
+    setSelectedProductIds([]);
+    setProductPage(safePage);
+    await loadModule(active, buildQueryParams(active, { page: safePage }));
+  }
+
+  async function handleProductLimitChange(nextLimit) {
+    const safeLimit = [10, 20, 50].includes(Number(nextLimit)) ? Number(nextLimit) : 20;
+    setSelectedProductIds([]);
+    setProductLimit(safeLimit);
+    setProductPage(1);
+    await loadModule(active, buildQueryParams(active, { page: 1, limit: safeLimit }));
   }
 
   async function handleCreateService(event) {
@@ -604,11 +967,86 @@ export default function App() {
     }
   }
 
+  async function handleCreateRole(event) {
+    event.preventDefault();
+    if (!roleDraft.name.trim()) return;
+
+    try {
+      await createRole({
+        name: roleDraft.name.trim(),
+        description: roleDraft.description.trim(),
+        permissions: roleDraft.permissions,
+        isActive: roleDraft.isActive,
+      });
+      setRoleDraft((prev) => ({ ...prev, name: "", description: "" }));
+      await Promise.all([loadModule(active, buildQueryParams()), loadRolesLookup()]);
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Create role failed");
+    }
+  }
+
+  async function handleCreateAdminUser(event) {
+    event.preventDefault();
+    if (!userDraft.username.trim() || !userDraft.password.trim() || !userDraft.displayName.trim() || !userDraft.roleId) {
+      return;
+    }
+
+    try {
+      await createAdminUser({
+        username: userDraft.username.trim(),
+        password: userDraft.password,
+        displayName: userDraft.displayName.trim(),
+        roleId: Number(userDraft.roleId),
+        isActive: userDraft.isActive,
+      });
+
+      setUserDraft({
+        username: "",
+        password: "",
+        displayName: "",
+        roleId: userDraft.roleId,
+        isActive: true,
+      });
+      await loadModule(active, buildQueryParams());
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Create user failed");
+    }
+  }
+
+  if (authChecking) {
+    return <div className="authShell">Checking session...</div>;
+  }
+
+  if (!authUser) {
+    return (
+      <div className="authShell">
+        <div className="authCard">
+          <h2>Plantu Admin Login</h2>
+          <form className="inlineForm authForm" onSubmit={handleLogin}>
+            <input
+              placeholder="Username"
+              value={loginDraft.username}
+              onChange={(e) => setLoginDraft((prev) => ({ ...prev, username: e.target.value }))}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={loginDraft.password}
+              onChange={(e) => setLoginDraft((prev) => ({ ...prev, password: e.target.value }))}
+            />
+            <button type="submit">Login</button>
+          </form>
+          {authError ? <p className="error">{authError}</p> : <p className="muted">Default seed login: admin / admin123</p>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="layout">
       <aside className="sidebar">
         <h2>Plantu Admin</h2>
-        {modules.map((moduleObj) => (
+        {visibleModules.map((moduleObj) => (
           <button
             key={moduleObj.key}
             className={active.key === moduleObj.key ? "navBtn active" : "navBtn"}
@@ -622,6 +1060,10 @@ export default function App() {
       <main className="content">
         <div className="headerRow">
           <h1>{activeLabel}</h1>
+          <div className="headerActions">
+            <span className="muted">{authUser.displayName || authUser.username} ({authUser.roleName})</span>
+            <button type="button" className="secondaryBtn" onClick={handleLogout}>Logout</button>
+          </div>
         </div>
 
         <h3 className="sectionHeading">Search & Filters</h3>
@@ -716,13 +1158,20 @@ export default function App() {
 
         {active.key === "products" && (
           <>
+          <h3 className="sectionHeading">Product Status Actions</h3>
+          <form className="inlineForm" onSubmit={handleBulkProductPatch}>
+            <select
+              value={bulkProductStatus}
+              onChange={(e) => setBulkProductStatus(e.target.value)}
+            >
+              <option value="active">Set Active</option>
+              <option value="inactive">Set Inactive</option>
+            </select>
+            <button type="submit">Apply To Selected ({selectedProductIds.length})</button>
+          </form>
+
           <h3 className="sectionHeading">Add Product</h3>
           <form className="inlineForm" onSubmit={handleCreateProduct}>
-            <input
-              placeholder="ID"
-              value={productDraft.id}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, id: e.target.value }))}
-            />
             <input
               placeholder="Product Name"
               value={productDraft.name}
@@ -745,27 +1194,23 @@ export default function App() {
               onChange={(e) => setProductDraft((prev) => ({ ...prev, price: e.target.value }))}
             />
             <input
-              placeholder="Rating"
-              value={productDraft.rating}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, rating: e.target.value }))}
-            />
-            <input
-              placeholder="Image Key (plant/pot/seed/tool)"
-              value={productDraft.image}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, image: e.target.value }))}
-            />
-            <input
-              placeholder="Stock Qty"
-              value={productDraft.stockQty}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, stockQty: e.target.value }))}
-            />
-            <input
               placeholder="Description"
               value={productDraft.description}
               onChange={(e) => setProductDraft((prev) => ({ ...prev, description: e.target.value }))}
             />
+            <input type="file" accept="image/*" onChange={handleProductImageChange} />
             <button type="submit">Add Product</button>
           </form>
+
+          {productDraft.image ? (
+            <p className="muted">
+              Uploaded image: <a href={productDraft.image} target="_blank" rel="noreferrer">{productDraft.image}</a>
+            </p>
+          ) : (
+            <p className="muted">Image upload is optional but must be {"<="} 100KB when provided.</p>
+          )}
+          {productUploadState.message ? <p className="muted">{productUploadState.message}</p> : null}
+          {productUploadState.error ? <p className="error">{productUploadState.error}</p> : null}
           </>
         )}
 
@@ -937,6 +1382,78 @@ export default function App() {
           </>
         )}
 
+        {active.key === "roles" && (
+          <>
+          <h3 className="sectionHeading">Add Role</h3>
+          <form className="inlineForm" onSubmit={handleCreateRole}>
+            <input
+              placeholder="Role Name"
+              value={roleDraft.name}
+              onChange={(e) => setRoleDraft((prev) => ({ ...prev, name: e.target.value }))}
+            />
+            <input
+              placeholder="Description"
+              value={roleDraft.description}
+              onChange={(e) => setRoleDraft((prev) => ({ ...prev, description: e.target.value }))}
+            />
+            <input
+              placeholder="Permissions (comma separated)"
+              value={roleDraft.permissions}
+              onChange={(e) => setRoleDraft((prev) => ({ ...prev, permissions: e.target.value }))}
+            />
+            <select
+              value={roleDraft.isActive ? "active" : "inactive"}
+              onChange={(e) => setRoleDraft((prev) => ({ ...prev, isActive: e.target.value === "active" }))}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <button type="submit">Add Role</button>
+          </form>
+          </>
+        )}
+
+        {active.key === "users" && (
+          <>
+          <h3 className="sectionHeading">Add Admin User</h3>
+          <form className="inlineForm" onSubmit={handleCreateAdminUser}>
+            <input
+              placeholder="Username"
+              value={userDraft.username}
+              onChange={(e) => setUserDraft((prev) => ({ ...prev, username: e.target.value }))}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={userDraft.password}
+              onChange={(e) => setUserDraft((prev) => ({ ...prev, password: e.target.value }))}
+            />
+            <input
+              placeholder="Display Name"
+              value={userDraft.displayName}
+              onChange={(e) => setUserDraft((prev) => ({ ...prev, displayName: e.target.value }))}
+            />
+            <select
+              value={userDraft.roleId}
+              onChange={(e) => setUserDraft((prev) => ({ ...prev, roleId: e.target.value }))}
+            >
+              <option value="">Select Role</option>
+              {rolesLookup.map((role) => (
+                <option key={role.id} value={role.id}>{role.name}</option>
+              ))}
+            </select>
+            <select
+              value={userDraft.isActive ? "active" : "inactive"}
+              onChange={(e) => setUserDraft((prev) => ({ ...prev, isActive: e.target.value === "active" }))}
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+            <button type="submit">Add User</button>
+          </form>
+          </>
+        )}
+
         {loading && <p className="muted">Loading...</p>}
         {error && <p className="error">{error}</p>}
         {!loading && !error && (
@@ -947,6 +1464,45 @@ export default function App() {
               onToggleOrder={toggleOrderSelection}
               onToggleAll={toggleSelectAllOrders}
             />
+          ) : active.key === "products" ? (
+            <>
+              <ProductsTable
+                rows={rows}
+                selectedProductIds={selectedProductIds}
+                onToggleProduct={toggleProductSelection}
+                onToggleAll={toggleSelectAllProducts}
+              />
+              <div className="paginationRow">
+                <span className="muted">Total: {productTotal}</span>
+                <label className="muted" htmlFor="productPageSize">Rows:</label>
+                <select
+                  id="productPageSize"
+                  value={productLimit}
+                  onChange={(e) => handleProductLimitChange(e.target.value)}
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                </select>
+                <button
+                  type="button"
+                  className="secondaryBtn"
+                  onClick={() => handleProductPageChange(productPage - 1)}
+                  disabled={productPage <= 1}
+                >
+                  Prev
+                </button>
+                <span className="muted">Page {productPage} / {productTotalPages}</span>
+                <button
+                  type="button"
+                  className="secondaryBtn"
+                  onClick={() => handleProductPageChange(productPage + 1)}
+                  disabled={productPage >= productTotalPages}
+                >
+                  Next
+                </button>
+              </div>
+            </>
           ) : (
             <DataTable rows={active.key === "inventory" ? inventoryFilteredRows : rows} />
           )

@@ -1,4 +1,5 @@
 const mysql = require("mysql2/promise");
+const crypto = require("crypto");
 
 let pool;
 
@@ -63,6 +64,10 @@ function parseList(value) {
   }
 }
 
+function hashPassword(value) {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
 async function query(sql, params = []) {
   const [rows] = await pool.query(sql, params);
   return rows;
@@ -120,6 +125,33 @@ async function initSchema() {
     )
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS admin_roles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(80) NOT NULL UNIQUE,
+      description VARCHAR(255) NULL,
+      permissions_json TEXT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(80) NOT NULL UNIQUE,
+      password_hash VARCHAR(128) NOT NULL,
+      display_name VARCHAR(120) NOT NULL,
+      role_id INT NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      last_login_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_admin_users_role FOREIGN KEY (role_id) REFERENCES admin_roles(id)
+    )
+  `);
+
   if (!(await columnExists("products", "stock_qty"))) {
     await query("ALTER TABLE products ADD COLUMN stock_qty INT NOT NULL DEFAULT 25");
   }
@@ -129,7 +161,13 @@ async function initSchema() {
   }
 
   if (!(await columnExists("products", "vendor_id"))) {
-    await query("ALTER TABLE products ADD COLUMN vendor_id INT NULL");
+    await query("ALTER TABLE products ADD COLUMN vendor_id VARCHAR(80) NULL");
+  } else {
+    await query("ALTER TABLE products MODIFY COLUMN vendor_id VARCHAR(80) NULL");
+  }
+
+  if (!(await columnExists("products", "onboarded_at"))) {
+    await query("ALTER TABLE products ADD COLUMN onboarded_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP");
   }
 
   await query(`
@@ -299,6 +337,36 @@ async function seedAdminData() {
     );
   }
 
+  const roleCount = await query("SELECT COUNT(1) AS count FROM admin_roles");
+  if (Number(roleCount[0].count) === 0) {
+    await query(
+      `INSERT INTO admin_roles (name, description, permissions_json, is_active)
+       VALUES (?, ?, ?, ?), (?, ?, ?, ?)`,
+      [
+        "SuperAdmin",
+        "Full system access",
+        JSON.stringify(["*"]),
+        1,
+        "Operations",
+        "Daily operations management",
+        JSON.stringify(["products", "services", "inventory", "orders", "customers", "taxControl"]),
+        1,
+      ]
+    );
+  }
+
+  const adminUserCount = await query("SELECT COUNT(1) AS count FROM admin_users");
+  if (Number(adminUserCount[0].count) === 0) {
+    const superAdminRole = await query("SELECT id FROM admin_roles WHERE name = ? LIMIT 1", ["SuperAdmin"]);
+    if (superAdminRole.length) {
+      await query(
+        `INSERT INTO admin_users (username, password_hash, display_name, role_id, is_active)
+         VALUES (?, ?, ?, ?, ?)`,
+        ["admin", hashPassword("admin123"), "Primary Admin", Number(superAdminRole[0].id), 1]
+      );
+    }
+  }
+
   const categoryCount = await query("SELECT COUNT(1) AS count FROM product_categories");
   if (Number(categoryCount[0].count) === 0) {
     await query(
@@ -380,14 +448,17 @@ async function checkDbHealth() {
   }
 }
 
-async function listProducts({ search, category } = {}) {
+async function listProducts({ search, category, isActive, page = 1, limit = 20 } = {}) {
   const clauses = [];
   const values = [];
   const normalizedSearch = normalizeSearchTerm(search);
   const normalizedCategory = toSlug(category);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+  const safePage = Math.max(1, Number(page || 1));
+  const safeLimit = [10, 20, 50].includes(Number(limit)) ? Number(limit) : 20;
 
   if (normalizedSearch) {
-    clauses.push("(CAST(id AS CHAR) LIKE ? OR LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(COALESCE(sku, '')) LIKE ?)");
+    clauses.push("(CAST(id AS CHAR) LIKE ? OR LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(COALESCE(vendor_id, '')) LIKE ?)");
     const like = `%${normalizedSearch.toLowerCase()}%`;
     values.push(like, like, like, like);
   }
@@ -397,8 +468,33 @@ async function listProducts({ search, category } = {}) {
     values.push(normalizedCategory);
   }
 
+  if (normalizedIsActive !== null) {
+    clauses.push("in_stock = ?");
+    values.push(normalizedIsActive);
+  }
+
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  return query(`SELECT * FROM products ${where} ORDER BY id ASC`, values);
+  const totalRows = await query(`SELECT COUNT(1) AS count FROM products ${where}`, values);
+  const total = Number(totalRows?.[0]?.count || 0);
+  const totalPages = Math.max(1, Math.ceil(total / safeLimit));
+  const offset = (safePage - 1) * safeLimit;
+
+  const rows = await query(
+    `SELECT id, name, category, price, image, description, in_stock, stock_qty, vendor_id, onboarded_at, created_at
+     FROM products
+     ${where}
+     ORDER BY id DESC
+     LIMIT ? OFFSET ?`,
+    [...values, safeLimit, offset]
+  );
+
+  return {
+    rows,
+    total,
+    page: safePage,
+    limit: safeLimit,
+    totalPages,
+  };
 }
 
 async function getProductCategoryBySlug(slug) {
@@ -418,23 +514,28 @@ async function createProduct(payload) {
   }
 
   const result = await query(
-    `INSERT INTO products (id, name, category, price, rating, image, description, in_stock, stock_qty, sku, vendor_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO products (name, category, price, rating, image, description, in_stock, stock_qty, sku, vendor_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      payload.id,
       payload.name,
       payload.category,
       payload.price,
-      payload.rating,
+      Number(payload.rating || 0),
       payload.image,
       payload.description,
-      payload.inStock ? 1 : 0,
-      payload.stockQty,
+      payload.isActive == null ? 1 : (payload.isActive ? 1 : 0),
+      Number(payload.stockQty || 0),
       payload.sku || null,
-      payload.vendorId || null,
+      String(payload.vendorId || payload.onboardedBy || "admin"),
     ]
   );
-  return { id: payload.id, affectedRows: result.affectedRows };
+
+  const rows = await query(
+    `SELECT id, name, category, price, image, description, in_stock, stock_qty, vendor_id, onboarded_at, created_at
+     FROM products WHERE id = ?`,
+    [result.insertId]
+  );
+  return rows[0] || null;
 }
 
 async function updateProduct(id, patch) {
@@ -454,17 +555,46 @@ async function updateProduct(id, patch) {
       patch.name,
       patch.category,
       patch.price,
-      patch.rating,
+      Number(patch.rating || 0),
       patch.image,
       patch.description,
       patch.inStock ? 1 : 0,
       patch.stockQty,
       patch.sku || null,
-      patch.vendorId || null,
+      String(patch.vendorId || patch.onboardedBy || "admin"),
       id,
     ]
   );
-  return query("SELECT * FROM products WHERE id = ?", [id]);
+  return query(
+    `SELECT id, name, category, price, image, description, in_stock, stock_qty, vendor_id, onboarded_at, created_at
+     FROM products WHERE id = ?`,
+    [id]
+  );
+}
+
+async function bulkUpdateProductStatus(productIds = [], isActive = true) {
+  const ids = Array.isArray(productIds)
+    ? productIds.map((item) => Number(item)).filter((item) => Number.isFinite(item) && item > 0)
+    : [];
+
+  if (!ids.length) {
+    const error = new Error("productIds must contain valid ids");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const placeholders = ids.map(() => "?").join(", ");
+  await query(
+    `UPDATE products SET in_stock = ? WHERE id IN (${placeholders})`,
+    [isActive ? 1 : 0, ...ids]
+  );
+
+  const rows = await query(
+    `SELECT id, name, in_stock, stock_qty, vendor_id FROM products WHERE id IN (${placeholders}) ORDER BY id DESC`,
+    ids
+  );
+
+  return rows;
 }
 
 async function listInventory({ search, category, stockStatus } = {}) {
@@ -1067,12 +1197,262 @@ async function updateTaxRule(id, payload) {
   return rows[0] || null;
 }
 
+function normalizePermissionList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value
+      .split(",")
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+async function listAdminRoles({ search, isActive } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(name) LIKE ? OR LOWER(COALESCE(description, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like);
+  }
+
+  if (normalizedIsActive !== null) {
+    clauses.push("is_active = ?");
+    values.push(normalizedIsActive);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = await query(
+    `SELECT id, name, description, permissions_json, is_active, created_at, updated_at
+     FROM admin_roles
+     ${where}
+     ORDER BY id ASC`,
+    values
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    permissions: parseList(row.permissions_json),
+  }));
+}
+
+async function createAdminRole(payload) {
+  const name = String(payload.name || "").trim();
+  const description = String(payload.description || "").trim();
+  const permissions = normalizePermissionList(payload.permissions);
+  const isActive = payload.isActive == null ? 1 : (payload.isActive ? 1 : 0);
+
+  if (!name) {
+    const error = new Error("name is required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const result = await query(
+    `INSERT INTO admin_roles (name, description, permissions_json, is_active)
+     VALUES (?, ?, ?, ?)`,
+    [name, description || null, JSON.stringify(permissions), isActive]
+  );
+
+  const rows = await query(
+    `SELECT id, name, description, permissions_json, is_active, created_at, updated_at
+     FROM admin_roles WHERE id = ?`,
+    [result.insertId]
+  );
+
+  return rows[0]
+    ? { ...rows[0], permissions: parseList(rows[0].permissions_json) }
+    : null;
+}
+
+async function updateAdminRole(id, payload) {
+  const existing = await query("SELECT * FROM admin_roles WHERE id = ?", [id]);
+  if (!existing.length) return null;
+
+  const current = existing[0];
+  const name = String(payload.name ?? current.name).trim();
+  const description = String(payload.description ?? current.description ?? "").trim();
+  const permissions = normalizePermissionList(payload.permissions ?? parseList(current.permissions_json));
+  const isActive = payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0);
+
+  if (!name) {
+    const error = new Error("name is required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  await query(
+    `UPDATE admin_roles
+     SET name = ?, description = ?, permissions_json = ?, is_active = ?
+     WHERE id = ?`,
+    [name, description || null, JSON.stringify(permissions), isActive, id]
+  );
+
+  const rows = await query(
+    `SELECT id, name, description, permissions_json, is_active, created_at, updated_at
+     FROM admin_roles WHERE id = ?`,
+    [id]
+  );
+
+  return rows[0]
+    ? { ...rows[0], permissions: parseList(rows[0].permissions_json) }
+    : null;
+}
+
+async function listAdminUsers({ search, isActive, roleId } = {}) {
+  const clauses = [];
+  const values = [];
+  const normalizedSearch = normalizeSearchTerm(search);
+  const normalizedIsActive = normalizeBoolFilter(isActive);
+  const normalizedRoleId = Number(roleId || 0);
+
+  if (normalizedSearch) {
+    clauses.push("(LOWER(u.username) LIKE ? OR LOWER(COALESCE(u.display_name, '')) LIKE ? OR LOWER(COALESCE(r.name, '')) LIKE ?)");
+    const like = `%${normalizedSearch.toLowerCase()}%`;
+    values.push(like, like, like);
+  }
+
+  if (normalizedIsActive !== null) {
+    clauses.push("u.is_active = ?");
+    values.push(normalizedIsActive);
+  }
+
+  if (normalizedRoleId > 0) {
+    clauses.push("u.role_id = ?");
+    values.push(normalizedRoleId);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return query(
+    `SELECT u.id, u.username, u.display_name, u.role_id, r.name AS role_name, u.is_active, u.last_login_at, u.created_at, u.updated_at
+     FROM admin_users u
+     LEFT JOIN admin_roles r ON r.id = u.role_id
+     ${where}
+     ORDER BY u.id ASC`,
+    values
+  );
+}
+
+async function createAdminUser(payload) {
+  const username = String(payload.username || "").trim().toLowerCase();
+  const password = String(payload.password || "").trim();
+  const displayName = String(payload.displayName || payload.display_name || "").trim();
+  const roleId = Number(payload.roleId || payload.role_id || 0);
+  const isActive = payload.isActive == null ? 1 : (payload.isActive ? 1 : 0);
+
+  if (!username || !password || !displayName || !roleId) {
+    const error = new Error("username, password, displayName and roleId are required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const role = await query("SELECT id FROM admin_roles WHERE id = ? LIMIT 1", [roleId]);
+  if (!role.length) {
+    const error = new Error("Invalid roleId");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  await query(
+    `INSERT INTO admin_users (username, password_hash, display_name, role_id, is_active)
+     VALUES (?, ?, ?, ?, ?)`,
+    [username, hashPassword(password), displayName, roleId, isActive]
+  );
+
+  const rows = await listAdminUsers({ search: username });
+  return rows.find((item) => String(item.username || "") === username) || null;
+}
+
+async function updateAdminUser(id, payload) {
+  const existing = await query("SELECT * FROM admin_users WHERE id = ?", [id]);
+  if (!existing.length) return null;
+
+  const current = existing[0];
+  const username = String(payload.username ?? current.username).trim().toLowerCase();
+  const displayName = String(payload.displayName ?? payload.display_name ?? current.display_name).trim();
+  const roleId = Number(payload.roleId ?? payload.role_id ?? current.role_id);
+  const isActive = payload.isActive == null ? Number(current.is_active || 0) : (payload.isActive ? 1 : 0);
+  const password = String(payload.password || "").trim();
+
+  if (!username || !displayName || !roleId) {
+    const error = new Error("username, displayName and roleId are required");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const role = await query("SELECT id FROM admin_roles WHERE id = ? LIMIT 1", [roleId]);
+  if (!role.length) {
+    const error = new Error("Invalid roleId");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  if (password) {
+    await query(
+      `UPDATE admin_users
+       SET username = ?, password_hash = ?, display_name = ?, role_id = ?, is_active = ?
+       WHERE id = ?`,
+      [username, hashPassword(password), displayName, roleId, isActive, id]
+    );
+  } else {
+    await query(
+      `UPDATE admin_users
+       SET username = ?, display_name = ?, role_id = ?, is_active = ?
+       WHERE id = ?`,
+      [username, displayName, roleId, isActive, id]
+    );
+  }
+
+  const rows = await listAdminUsers({});
+  return rows.find((item) => Number(item.id) === Number(id)) || null;
+}
+
+async function getAdminUserByUsername(username) {
+  const normalized = String(username || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  const rows = await query(
+    `SELECT u.id, u.username, u.password_hash, u.display_name, u.role_id, u.is_active,
+            r.name AS role_name, r.permissions_json
+     FROM admin_users u
+     LEFT JOIN admin_roles r ON r.id = u.role_id
+     WHERE u.username = ?
+     LIMIT 1`,
+    [normalized]
+  );
+
+  if (!rows.length) return null;
+
+  const row = rows[0];
+  return {
+    ...row,
+    permissions: parseList(row.permissions_json),
+  };
+}
+
+async function markAdminUserLogin(userId) {
+  await query("UPDATE admin_users SET last_login_at = NOW() WHERE id = ?", [Number(userId)]);
+}
+
+function verifyPassword(password, hash) {
+  return hashPassword(password) === String(hash || "");
+}
+
 module.exports = {
   initDb,
   checkDbHealth,
   listProducts,
   createProduct,
   updateProduct,
+  bulkUpdateProductStatus,
   listInventory,
   updateInventory,
   listCustomers,
@@ -1095,4 +1475,13 @@ module.exports = {
   listTaxRules,
   upsertTaxRule,
   updateTaxRule,
+  listAdminRoles,
+  createAdminRole,
+  updateAdminRole,
+  listAdminUsers,
+  createAdminUser,
+  updateAdminUser,
+  getAdminUserByUsername,
+  markAdminUserLogin,
+  verifyPassword,
 };

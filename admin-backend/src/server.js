@@ -2,12 +2,16 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const {
   initDb,
   checkDbHealth,
   listProducts,
   createProduct,
   updateProduct,
+  bulkUpdateProductStatus,
   listInventory,
   updateInventory,
   listCustomers,
@@ -30,14 +34,31 @@ const {
   listTaxRules,
   upsertTaxRule,
   updateTaxRule,
+  listAdminRoles,
+  createAdminRole,
+  updateAdminRole,
+  listAdminUsers,
+  createAdminUser,
+  updateAdminUser,
+  getAdminUserByUsername,
+  markAdminUserLogin,
+  verifyPassword,
 } = require("./db");
 
 const app = express();
 const PORT = Number(process.env.PORT || 5001);
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "admin123";
+const ADMIN_SESSIONS = new Map();
+const UPLOAD_ROOT = path.join(__dirname, "..", "uploads");
+const PRODUCT_UPLOAD_DIR = path.join(UPLOAD_ROOT, "products");
+
+if (!fs.existsSync(PRODUCT_UPLOAD_DIR)) {
+  fs.mkdirSync(PRODUCT_UPLOAD_DIR, { recursive: true });
+}
 
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(UPLOAD_ROOT));
 
 function ok(res, data) {
   return res.json({ success: true, data });
@@ -48,11 +69,43 @@ function fail(res, status, message) {
 }
 
 function requireAdminToken(req, res, next) {
-  const token = req.headers["x-admin-token"];
-  if (!token || token !== ADMIN_TOKEN) {
+  const token = String(req.headers["x-admin-token"] || "").trim();
+  if (!token) {
     return fail(res, 401, "Unauthorized admin request");
   }
+
+  if (token === ADMIN_TOKEN) {
+    req.adminSession = {
+      username: "admin",
+      displayName: "Legacy Admin",
+      roleName: "SuperAdmin",
+      permissions: ["*"],
+    };
+    return next();
+  }
+
+  const session = ADMIN_SESSIONS.get(token);
+  if (!session || !session.userId) {
+    return fail(res, 401, "Unauthorized admin request");
+  }
+
+  req.adminSession = session;
   return next();
+}
+
+function sanitizeAdminUser(user) {
+  if (!user) return null;
+
+  return {
+    id: Number(user.id),
+    username: String(user.username || ""),
+    displayName: String(user.display_name || user.displayName || ""),
+    roleId: Number(user.role_id || user.roleId || 0),
+    roleName: String(user.role_name || user.roleName || ""),
+    isActive: Number(user.is_active || user.isActive || 0) === 1,
+    permissions: Array.isArray(user.permissions) ? user.permissions : [],
+    lastLoginAt: user.last_login_at || user.lastLoginAt || null,
+  };
 }
 
 app.get("/health", (_req, res) => ok(res, { service: "plantu-admin-backend", status: "up" }));
@@ -63,7 +116,91 @@ app.get("/health/dependencies", async (_req, res) => {
   return res.status(healthy ? 200 : 503).json({ success: healthy, data: { mysql: db } });
 });
 
+app.post("/auth/login", async (req, res) => {
+  try {
+    const username = String(req.body?.username || "").trim().toLowerCase();
+    const password = String(req.body?.password || "").trim();
+
+    if (!username || !password) {
+      return fail(res, 400, "username and password are required");
+    }
+
+    const user = await getAdminUserByUsername(username);
+    if (!user || !verifyPassword(password, user.password_hash) || Number(user.is_active || 0) !== 1) {
+      return fail(res, 401, "Invalid username or password");
+    }
+
+    const token = `adm_${crypto.randomUUID()}`;
+    const safeUser = sanitizeAdminUser(user);
+    ADMIN_SESSIONS.set(token, {
+      token,
+      userId: safeUser.id,
+      username: safeUser.username,
+      displayName: safeUser.displayName,
+      roleName: safeUser.roleName,
+      permissions: safeUser.permissions,
+      createdAt: Date.now(),
+    });
+
+    await markAdminUserLogin(safeUser.id);
+    return ok(res, { token, user: safeUser });
+  } catch (error) {
+    return fail(res, 500, `Failed to login: ${error.message}`);
+  }
+});
+
 app.use(requireAdminToken);
+
+app.get("/auth/me", async (req, res) => {
+  return ok(res, {
+    username: req.adminSession.username,
+    displayName: req.adminSession.displayName,
+    roleName: req.adminSession.roleName,
+    permissions: req.adminSession.permissions || [],
+  });
+});
+
+app.post("/auth/logout", async (req, res) => {
+  const token = String(req.headers["x-admin-token"] || "").trim();
+  if (token && token !== ADMIN_TOKEN) {
+    ADMIN_SESSIONS.delete(token);
+  }
+  return ok(res, { loggedOut: true });
+});
+
+app.post("/admin/uploads/product-image", async (req, res) => {
+  try {
+    const fileName = String(req.body?.fileName || "product-image").trim();
+    const mimeType = String(req.body?.mimeType || "").trim().toLowerCase();
+    const dataBase64 = String(req.body?.dataBase64 || "").trim();
+
+    if (!mimeType.startsWith("image/")) {
+      return fail(res, 400, "Only image uploads are allowed");
+    }
+
+    if (!dataBase64) {
+      return fail(res, 400, "Image data is required");
+    }
+
+    const buffer = Buffer.from(dataBase64, "base64");
+    if (buffer.length > 100 * 1024) {
+      return fail(res, 400, "Image must be <= 100KB");
+    }
+
+    const ext = mimeType.split("/")[1] || "png";
+    const safeBase = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/\.+$/, "") || "product-image";
+    const finalName = `${Date.now()}_${safeBase}.${ext}`;
+    const fullPath = path.join(PRODUCT_UPLOAD_DIR, finalName);
+    fs.writeFileSync(fullPath, buffer);
+
+    return ok(res, {
+      imageUrl: `/uploads/products/${finalName}`,
+      sizeBytes: buffer.length,
+    });
+  } catch (error) {
+    return fail(res, 500, `Failed to upload image: ${error.message}`);
+  }
+});
 
 app.get("/admin/products", async (req, res) => {
   try {
@@ -119,24 +256,47 @@ app.put("/admin/product-categories/:id", async (req, res) => {
 app.post("/admin/products", async (req, res) => {
   try {
     const payload = req.body || {};
-    if (!payload.id || !payload.name || !payload.category) {
-      return fail(res, 400, "id, name and category are required");
+    if (!payload.name || !payload.category) {
+      return fail(res, 400, "name and category are required");
     }
-    if (payload.price == null || payload.rating == null) {
-      return fail(res, 400, "price and rating are required");
+    if (payload.price == null) {
+      return fail(res, 400, "price is required");
     }
 
-    await createProduct({
+    const created = await createProduct({
       ...payload,
-      stockQty: Number(payload.stockQty || 0),
-      inStock: Boolean(payload.inStock),
+      stockQty: 0,
+      rating: 0,
+      isActive: payload.isActive == null ? true : Boolean(payload.isActive),
+      onboardedBy: req.adminSession?.username || "admin",
     });
-    return ok(res, { created: true, id: payload.id });
+    return ok(res, created);
   } catch (error) {
     if (error.code === "INVALID_CATEGORY") {
       return fail(res, 400, error.message);
     }
     return fail(res, 500, `Failed to create product: ${error.message}`);
+  }
+});
+
+app.patch("/admin/products/bulk-status", async (req, res) => {
+  try {
+    const productIds = Array.isArray(req.body?.productIds)
+      ? req.body.productIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+
+    if (!productIds.length) {
+      return fail(res, 400, "productIds must contain at least one valid id");
+    }
+
+    const isActive = Boolean(req.body?.isActive);
+    const updated = await bulkUpdateProductStatus(productIds, isActive);
+    return ok(res, { updated });
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to bulk update product status: ${error.message}`);
   }
 });
 
@@ -336,6 +496,90 @@ app.get("/admin/tax-rules", async (req, res) => {
     return ok(res, await listTaxRules(req.query || {}));
   } catch (error) {
     return fail(res, 500, `Failed to fetch tax rules: ${error.message}`);
+  }
+});
+
+app.get("/admin/roles", async (req, res) => {
+  try {
+    return ok(res, await listAdminRoles(req.query || {}));
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch roles: ${error.message}`);
+  }
+});
+
+app.post("/admin/roles", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.name) {
+      return fail(res, 400, "name is required");
+    }
+    return ok(res, await createAdminRole(payload));
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to create role: ${error.message}`);
+  }
+});
+
+app.put("/admin/roles/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid role id");
+    }
+    const updated = await updateAdminRole(id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "Role not found");
+    }
+    return ok(res, updated);
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to update role: ${error.message}`);
+  }
+});
+
+app.get("/admin/users", async (req, res) => {
+  try {
+    return ok(res, await listAdminUsers(req.query || {}));
+  } catch (error) {
+    return fail(res, 500, `Failed to fetch users: ${error.message}`);
+  }
+});
+
+app.post("/admin/users", async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.username || !payload.password || !payload.displayName || !payload.roleId) {
+      return fail(res, 400, "username, password, displayName and roleId are required");
+    }
+    return ok(res, await createAdminUser(payload));
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to create user: ${error.message}`);
+  }
+});
+
+app.put("/admin/users/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid user id");
+    }
+    const updated = await updateAdminUser(id, req.body || {});
+    if (!updated) {
+      return fail(res, 404, "User not found");
+    }
+    return ok(res, updated);
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to update user: ${error.message}`);
   }
 });
 

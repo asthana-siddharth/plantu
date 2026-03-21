@@ -51,6 +51,27 @@ body {
   padding: 20px;
 }
 
+.authShell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.authCard {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.authForm {
+  display: grid;
+}
+
 .headerRow {
   display: flex;
   justify-content: space-between;
@@ -103,6 +124,21 @@ body {
 
 .inlineForm .secondaryBtn {
   background: #64748b;
+}
+
+.secondaryBtn {
+  border: none;
+  background: #64748b;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 input[type="checkbox"] {
@@ -168,6 +204,14 @@ th {
   justify-content: space-between;
   padding-top: 6px;
   color: #334155;
+}
+
+.paginationRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
 }
 
 .muted {
