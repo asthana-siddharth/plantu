@@ -12,6 +12,7 @@ const {
   createProduct,
   updateProduct,
   bulkUpdateProductStatus,
+  deleteProduct,
   listInventory,
   updateInventory,
   listCustomers,
@@ -315,6 +316,27 @@ app.put("/admin/products/:id", async (req, res) => {
       return fail(res, 400, error.message);
     }
     return fail(res, 500, `Failed to update product: ${error.message}`);
+  }
+});
+
+app.delete("/admin/products/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return fail(res, 400, "Invalid product id");
+    }
+
+    const deletedCount = await deleteProduct(id);
+    if (!deletedCount) {
+      return fail(res, 404, "Product not found");
+    }
+
+    return ok(res, { deleted: true, id });
+  } catch (error) {
+    if (error.code === "BAD_INPUT") {
+      return fail(res, 400, error.message);
+    }
+    return fail(res, 500, `Failed to delete product: ${error.message}`);
   }
 });
 

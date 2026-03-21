@@ -16,6 +16,7 @@ import {
   patchInventory,
   patchOrderStatus,
   getStoredAdminToken,
+  deleteProduct,
   uploadProductImage,
   upsertTaxRule,
 } from "./api";
@@ -251,7 +252,7 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
-function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll }) {
+function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll, onDeleteProduct }) {
   if (!rows.length) return <p className="muted">No rows found</p>;
 
   const allSelected = rows.length > 0 && rows.every((row) => selectedProductIds.includes(String(row.id)));
@@ -273,6 +274,7 @@ function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll 
             <th>Onboarded At</th>
             <th>Image</th>
             <th>Description</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -307,6 +309,11 @@ function ProductsTable({ rows, selectedProductIds, onToggleProduct, onToggleAll 
                   )}
                 </td>
                 <td>{pretty(row.description)}</td>
+                <td>
+                  <button type="button" className="dangerBtn" onClick={() => onDeleteProduct(row)}>
+                    Delete
+                  </button>
+                </td>
               </tr>
             );
           })}
@@ -345,6 +352,7 @@ export default function App() {
     message: "",
     error: "",
   });
+  const [showProductModal, setShowProductModal] = useState(false);
   const [categories, setCategories] = useState([]);
   const [categoryName, setCategoryName] = useState("");
   const [categoryHead, setCategoryHead] = useState("item");
@@ -444,13 +452,13 @@ export default function App() {
     switch (active.key) {
       case "products":
         return [
-          { value: "all", label: "All Products" },
+          { value: "all", label: "Both" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
       case "services":
         return [
-          { value: "all", label: "All Status" },
+          { value: "all", label: "Both" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
@@ -469,7 +477,7 @@ export default function App() {
       case "customers":
       case "vendors":
         return [
-          { value: "all", label: "All Status" },
+          { value: "all", label: "Both" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
@@ -477,14 +485,14 @@ export default function App() {
         return [{ value: "all", label: "All Status" }, ...ORDER_STATUSES.map((status) => ({ value: status, label: status }))];
       case "promotions":
         return [
-          { value: "all", label: "All Status" },
+          { value: "all", label: "Both" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
       case "roles":
       case "users":
         return [
-          { value: "all", label: "All Status" },
+          { value: "all", label: "Both" },
           { value: "active", label: "Active" },
           { value: "inactive", label: "Inactive" },
         ];
@@ -797,6 +805,7 @@ export default function App() {
         image: "",
         description: "",
       });
+      setShowProductModal(false);
       setProductUploadState({ uploading: false, message: "", error: "" });
       await loadModule(active, buildQueryParams());
     } catch (err) {
@@ -860,6 +869,22 @@ export default function App() {
     }
   }
 
+  async function handleDeleteProduct(row) {
+    const id = Number(row?.id || 0);
+    if (!id) return;
+
+    const accepted = window.confirm(`Delete product #${id} (${row?.name || "Unknown"})?`);
+    if (!accepted) return;
+
+    try {
+      await deleteProduct(id);
+      setSelectedProductIds((prev) => prev.filter((productId) => productId !== String(id)));
+      await loadModule(active, buildQueryParams());
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || "Delete product failed");
+    }
+  }
+
   function toggleProductSelection(productId) {
     setSelectedProductIds((prev) =>
       prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]
@@ -881,6 +906,11 @@ export default function App() {
     event.preventDefault();
     if (!selectedProductIds.length) {
       setError("Select at least one product");
+      return;
+    }
+
+    if (bulkProductStatus === "both") {
+      setError("Choose Active or Inactive for bulk update");
       return;
     }
 
@@ -1164,53 +1194,71 @@ export default function App() {
               value={bulkProductStatus}
               onChange={(e) => setBulkProductStatus(e.target.value)}
             >
+              <option value="both">Both</option>
               <option value="active">Set Active</option>
               <option value="inactive">Set Inactive</option>
             </select>
             <button type="submit">Apply To Selected ({selectedProductIds.length})</button>
           </form>
 
-          <h3 className="sectionHeading">Add Product</h3>
-          <form className="inlineForm" onSubmit={handleCreateProduct}>
-            <input
-              placeholder="Product Name"
-              value={productDraft.name}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, name: e.target.value }))}
-            />
-            <select
-              value={productDraft.category}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, category: e.target.value }))}
-            >
-              <option value="">Select Category</option>
-              {itemCategories.map((cat) => (
-                <option key={cat.id} value={cat.slug}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-            <input
-              placeholder="Price"
-              value={productDraft.price}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, price: e.target.value }))}
-            />
-            <input
-              placeholder="Description"
-              value={productDraft.description}
-              onChange={(e) => setProductDraft((prev) => ({ ...prev, description: e.target.value }))}
-            />
-            <input type="file" accept="image/*" onChange={handleProductImageChange} />
-            <button type="submit">Add Product</button>
-          </form>
+          <div className="inlineForm">
+            <button type="button" onClick={() => setShowProductModal(true)}>Add Product (Popup)</button>
+          </div>
 
-          {productDraft.image ? (
-            <p className="muted">
-              Uploaded image: <a href={productDraft.image} target="_blank" rel="noreferrer">{productDraft.image}</a>
-            </p>
-          ) : (
-            <p className="muted">Image upload is optional but must be {"<="} 100KB when provided.</p>
-          )}
           {productUploadState.message ? <p className="muted">{productUploadState.message}</p> : null}
           {productUploadState.error ? <p className="error">{productUploadState.error}</p> : null}
+
+          {showProductModal ? (
+            <div className="modalOverlay" role="dialog" aria-modal="true">
+              <div className="modalCard">
+                <div className="headerRow">
+                  <h3 className="sectionHeading">Add Product</h3>
+                  <button type="button" className="secondaryBtn" onClick={() => setShowProductModal(false)}>
+                    Close
+                  </button>
+                </div>
+
+                <form className="inlineForm" onSubmit={handleCreateProduct}>
+                  <input
+                    placeholder="Product Name"
+                    value={productDraft.name}
+                    onChange={(e) => setProductDraft((prev) => ({ ...prev, name: e.target.value }))}
+                  />
+                  <select
+                    value={productDraft.category}
+                    onChange={(e) => setProductDraft((prev) => ({ ...prev, category: e.target.value }))}
+                  >
+                    <option value="">Select Category</option>
+                    {itemCategories.map((cat) => (
+                      <option key={cat.id} value={cat.slug}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="Price"
+                    value={productDraft.price}
+                    onChange={(e) => setProductDraft((prev) => ({ ...prev, price: e.target.value }))}
+                  />
+                  <input
+                    placeholder="Description"
+                    value={productDraft.description}
+                    onChange={(e) => setProductDraft((prev) => ({ ...prev, description: e.target.value }))}
+                  />
+                  <input type="file" accept="image/*" onChange={handleProductImageChange} />
+                  <button type="submit">Add Product</button>
+                </form>
+
+                {productDraft.image ? (
+                  <p className="muted">
+                    Uploaded image: <a href={productDraft.image} target="_blank" rel="noreferrer">{productDraft.image}</a>
+                  </p>
+                ) : (
+                  <p className="muted">Image upload is optional but must be {"<="} 100KB when provided.</p>
+                )}
+              </div>
+            </div>
+          ) : null}
           </>
         )}
 
@@ -1471,6 +1519,7 @@ export default function App() {
                 selectedProductIds={selectedProductIds}
                 onToggleProduct={toggleProductSelection}
                 onToggleAll={toggleSelectAllProducts}
+                onDeleteProduct={handleDeleteProduct}
               />
               <div className="paginationRow">
                 <span className="muted">Total: {productTotal}</span>

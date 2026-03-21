@@ -602,6 +602,18 @@ async function bulkUpdateProductStatus(productIds = [], isActive = true) {
   return rows;
 }
 
+async function deleteProduct(id) {
+  const productId = Number(id);
+  if (!Number.isFinite(productId) || productId <= 0) {
+    const error = new Error("Invalid product id");
+    error.code = "BAD_INPUT";
+    throw error;
+  }
+
+  const result = await query("DELETE FROM products WHERE id = ?", [productId]);
+  return Number(result.affectedRows || 0);
+}
+
 async function listInventory({ search, category, stockStatus } = {}) {
   const clauses = [];
   const values = [];
@@ -1458,6 +1470,7 @@ module.exports = {
   createProduct,
   updateProduct,
   bulkUpdateProductStatus,
+  deleteProduct,
   listInventory,
   updateInventory,
   listCustomers,

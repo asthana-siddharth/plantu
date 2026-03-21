@@ -101,6 +101,11 @@ export async function uploadProductImage(payload) {
   return response?.data?.data;
 }
 
+export async function deleteProduct(id) {
+  const response = await API.delete(`/admin/products/${id}`);
+  return response?.data?.data;
+}
+
 export async function createService(payload) {
   const response = await API.post("/admin/services", payload);
   return response?.data?.data;
